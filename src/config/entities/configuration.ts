@@ -161,7 +161,10 @@ export default () => ({
   },
   expirationTimeInSeconds: {
     default: parseInt(process.env.EXPIRATION_TIME_DEFAULT_SECONDS ?? `${60}`),
+    rpc: parseInt(process.env.EXPIRATION_TIME_RPC_SECONDS ?? `${15}`),
     holesky: parseInt(process.env.HOLESKY_EXPIRATION_TIME_SECONDS ?? `${60}`),
+    indexing: parseInt(process.env.EXPIRATION_TIME_INDEXING_SECONDS ?? `${5}`),
+    staking: parseInt(process.env.EXPIRATION_TIME_STAKING_SECONDS ?? `${60}`),
     notFound: {
       default: parseInt(
         process.env.DEFAULT_NOT_FOUND_EXPIRE_TIME_SECONDS ?? `${30}`,
@@ -203,6 +206,11 @@ export default () => ({
     accounts: process.env.FF_ACCOUNTS?.toLowerCase() === 'true',
     pushNotifications:
       process.env.FF_PUSH_NOTIFICATIONS?.toLowerCase() === 'true',
+    nativeStaking: process.env.FF_NATIVE_STAKING?.toLowerCase() === 'true',
+    nativeStakingDecoding:
+      process.env.FF_NATIVE_STAKING_DECODING?.toLowerCase() === 'true',
+    targetedMessaging:
+      process.env.FF_TARGETED_MESSAGING?.toLowerCase() === 'true',
   },
   httpClient: {
     // Timeout in milliseconds to be used for the HTTP client.
@@ -260,11 +268,30 @@ export default () => ({
       process.env.RELAY_PROVIDER_API_BASE_URI || 'https://api.gelato.digital',
     limit: parseInt(process.env.RELAY_THROTTLE_LIMIT ?? `${5}`),
     ttlSeconds: parseInt(
-      process.env.RELAY_THROTTLE_TTL_SECONDS ?? `${60 * 60}`,
+      process.env.RELAY_THROTTLE_TTL_SECONDS ?? `${60 * 60 * 24}`,
     ),
     apiKey: {
+      // Optimism
+      10: process.env.RELAY_PROVIDER_API_KEY_OPTIMISM,
+      // BNB
+      56: process.env.RELAY_PROVIDER_API_KEY_BSC,
+      // Gnosis
       100: process.env.RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN,
+      // Polygon
+      137: process.env.RELAY_PROVIDER_API_KEY_POLYGON,
+      // Polygon zkEVM
+      1101: process.env.RELAY_PROVIDER_API_KEY_POLYGON_ZKEVM,
+      // Base
+      8453: process.env.RELAY_PROVIDER_API_KEY_BASE,
+      // Arbitrum
       42161: process.env.RELAY_PROVIDER_API_KEY_ARBITRUM_ONE,
+      // Avalanche
+      43114: process.env.RELAY_PROVIDER_API_KEY_AVALANCHE,
+      // Linea
+      59144: process.env.RELAY_PROVIDER_API_KEY_LINEA,
+      // Blast
+      81457: process.env.RELAY_PROVIDER_API_KEY_BLAST,
+      // Sepolia
       11155111: process.env.RELAY_PROVIDER_API_KEY_SEPOLIA,
     },
   },
@@ -277,6 +304,18 @@ export default () => ({
   },
   safeWebApp: {
     baseUri: process.env.SAFE_WEB_APP_BASE_URI || 'https://app.safe.global',
+  },
+  staking: {
+    testnet: {
+      baseUri:
+        process.env.STAKING_TESTNET_API_BASE_URI ||
+        'https://api.testnet.kiln.fi',
+      apiKey: process.env.STAKING_TESTNET_API_KEY,
+    },
+    mainnet: {
+      baseUri: process.env.STAKING_API_BASE_URI || 'https://api.kiln.fi',
+      apiKey: process.env.STAKING_API_KEY,
+    },
   },
   swaps: {
     api: {

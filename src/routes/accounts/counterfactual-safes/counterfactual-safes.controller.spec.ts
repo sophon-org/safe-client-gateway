@@ -18,7 +18,7 @@ import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.
 import { NetworkModule } from '@/datasources/network/network.module';
 import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
 import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
-import { IAccountsRepository } from '@/domain/accounts/accounts.repository.interface';
+import type { IAccountsRepository } from '@/domain/accounts/accounts.repository.interface';
 import { counterfactualSafeBuilder } from '@/domain/accounts/counterfactual-safes/entities/__tests__/counterfactual-safe.builder';
 import { createCounterfactualSafeDtoBuilder } from '@/domain/accounts/counterfactual-safes/entities/__tests__/create-counterfactual-safe.dto.entity.builder';
 import { accountDataSettingBuilder } from '@/domain/accounts/entities/__tests__/account-data-setting.builder';
@@ -34,9 +34,11 @@ import { RequestScopedLoggingModule } from '@/logging/logging.module';
 import { CounterfactualSafesController } from '@/routes/accounts/counterfactual-safes/counterfactual-safes.controller';
 import { AuthGuard } from '@/routes/auth/guards/auth.guard';
 import { faker } from '@faker-js/faker';
-import { INestApplication, NotFoundException } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import { Server } from 'http';
+import type { INestApplication } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
+import type { Server } from 'http';
 import request from 'supertest';
 import { getAddress } from 'viem';
 
@@ -96,8 +98,6 @@ describe('CounterfactualSafesController', () => {
   describe('AuthGuard', () => {
     it('checks that the AuthGuard is applied to the proper controller endpoints', () => {
       const protectedEndpoints = [
-        CounterfactualSafesController.prototype.getCounterfactualSafe,
-        CounterfactualSafesController.prototype.getCounterfactualSafes,
         CounterfactualSafesController.prototype.createCounterfactualSafe,
         CounterfactualSafesController.prototype.deleteCounterfactualSafe,
         CounterfactualSafesController.prototype.deleteCounterfactualSafes,
@@ -110,28 +110,7 @@ describe('CounterfactualSafesController', () => {
     it('should return a Counterfactual Safe', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
       const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
       const counterfactualSafe = counterfactualSafeBuilder().build();
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
       counterfactualSafesDataSource.getCounterfactualSafe.mockResolvedValue(
         counterfactualSafe,
       );
@@ -140,7 +119,6 @@ describe('CounterfactualSafesController', () => {
         .get(
           `/v1/accounts/${address}/counterfactual-safes/${chain.chainId}/${counterfactualSafe.predicted_address}`,
         )
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(200)
         .expect({
           chainId: counterfactualSafe.chain_id,
@@ -154,84 +132,10 @@ describe('CounterfactualSafesController', () => {
         });
     });
 
-    it('should fail if the authPayload does not match the URL address', async () => {
-      const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', getAddress(faker.finance.ethereumAddress()))
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-
-      await request(app.getHttpServer())
-        .get(
-          `/v1/accounts/${address}/counterfactual-safes/${chain.chainId}/${getAddress(faker.finance.ethereumAddress())}`,
-        )
-        .set('Cookie', [`access_token=${accessToken}`])
-        .expect(401);
-
-      expect(accountsRepository.getAccount).not.toHaveBeenCalled();
-      expect(
-        counterfactualSafesDataSource.getCounterfactualSafe,
-      ).not.toHaveBeenCalled();
-    });
-
-    it('should fail if the account does not have the CounterfactualSafes data setting enabled', async () => {
-      const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.AddressBook)
-          .build(),
-      ];
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', false)
-          .build(),
-      ]);
-
-      await request(app.getHttpServer())
-        .get(
-          `/v1/accounts/${address}/counterfactual-safes/${chain.chainId}/${getAddress(faker.finance.ethereumAddress())}`,
-        )
-        .set('Cookie', [`access_token=${accessToken}`])
-        .expect(410);
-    });
-
     it('should not propagate a database error', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
       const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
       const counterfactualSafe = counterfactualSafeBuilder().build();
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
       counterfactualSafesDataSource.getCounterfactualSafe.mockRejectedValue(
         new Error('Database error.'),
       );
@@ -240,7 +144,6 @@ describe('CounterfactualSafesController', () => {
         .get(
           `/v1/accounts/${address}/counterfactual-safes/${chain.chainId}/${counterfactualSafe.predicted_address}`,
         )
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(500)
         .expect({
           code: 500,
@@ -248,77 +151,10 @@ describe('CounterfactualSafesController', () => {
         });
     });
 
-    it('should return a Counterfactual Safe even if the token is associated with a different chain ID', async () => {
-      const address = getAddress(faker.finance.ethereumAddress());
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', faker.string.numeric())
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
-      const counterfactualSafe = counterfactualSafeBuilder().build();
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
-      counterfactualSafesDataSource.getCounterfactualSafe.mockResolvedValue(
-        counterfactualSafe,
-      );
-
-      await request(app.getHttpServer())
-        .get(
-          `/v1/accounts/${address}/counterfactual-safes/${faker.string.numeric({ exclude: authPayloadDto.chain_id })}/${counterfactualSafe.predicted_address}`,
-        )
-        .set('Cookie', [`access_token=${accessToken}`])
-        .expect(200)
-        .expect({
-          chainId: counterfactualSafe.chain_id,
-          creator: counterfactualSafe.creator,
-          fallbackHandler: counterfactualSafe.fallback_handler,
-          owners: counterfactualSafe.owners,
-          predictedAddress: counterfactualSafe.predicted_address,
-          saltNonce: counterfactualSafe.salt_nonce,
-          singletonAddress: counterfactualSafe.singleton_address,
-          threshold: counterfactualSafe.threshold,
-        });
-    });
-
     it('should return 404 if the Counterfactual Safe does not exist', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
       const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
       const counterfactualSafe = counterfactualSafeBuilder().build();
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
       counterfactualSafesDataSource.getCounterfactualSafe.mockRejectedValue(
         new NotFoundException('Error getting Counterfactual Safe.'),
       );
@@ -327,7 +163,6 @@ describe('CounterfactualSafesController', () => {
         .get(
           `/v1/accounts/${address}/counterfactual-safes/${chain.chainId}/${counterfactualSafe.predicted_address}`,
         )
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(404);
     });
   });
@@ -335,39 +170,16 @@ describe('CounterfactualSafesController', () => {
   describe('Get Counterfactual Safes', () => {
     it('should return all the Counterfactual Safes associated with the account address', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
       const counterfactualSafes = Array.from(
         { length: faker.number.int({ min: 1, max: 4 }) },
         () => counterfactualSafeBuilder().build(),
       );
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
-      counterfactualSafesDataSource.getCounterfactualSafesForAccount.mockResolvedValue(
+      counterfactualSafesDataSource.getCounterfactualSafesForAddress.mockResolvedValue(
         counterfactualSafes,
       );
 
       await request(app.getHttpServer())
         .get(`/v1/accounts/${address}/counterfactual-safes`)
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(200)
         .expect(
           counterfactualSafes.map((counterfactualSafe) => ({
@@ -383,99 +195,21 @@ describe('CounterfactualSafesController', () => {
         );
 
       expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
-      ).toHaveBeenCalledWith(account);
+        counterfactualSafesDataSource.getCounterfactualSafesForAddress,
+      ).toHaveBeenCalledWith(address);
       expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
+        counterfactualSafesDataSource.getCounterfactualSafesForAddress,
       ).toHaveBeenCalledTimes(1);
-    });
-
-    it('should fail if the account does not have the CounterfactualSafes data setting enabled', async () => {
-      const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', false)
-          .build(),
-      ];
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
-
-      await request(app.getHttpServer())
-        .get(`/v1/accounts/${address}/counterfactual-safes`)
-        .set('Cookie', [`access_token=${accessToken}`])
-        .expect(410);
-
-      expect(accountsRepository.getAccount).not.toHaveBeenCalled();
-      expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
-      ).not.toHaveBeenCalled();
-    });
-
-    it('should fail if the authPayload does not match the URL address', async () => {
-      const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', getAddress(faker.finance.ethereumAddress()))
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-
-      await request(app.getHttpServer())
-        .get(`/v1/accounts/${address}/counterfactual-safes`)
-        .set('Cookie', [`access_token=${accessToken}`])
-        .expect(401);
-
-      expect(accountsRepository.getAccount).not.toHaveBeenCalled();
-      expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
-      ).not.toHaveBeenCalled();
     });
 
     it('should not propagate a database error', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
-      counterfactualSafesDataSource.getCounterfactualSafesForAccount.mockRejectedValue(
+      counterfactualSafesDataSource.getCounterfactualSafesForAddress.mockRejectedValue(
         new Error('Database error.'),
       );
 
       await request(app.getHttpServer())
         .get(`/v1/accounts/${address}/counterfactual-safes`)
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(500)
         .expect({
           code: 500,
@@ -483,44 +217,21 @@ describe('CounterfactualSafesController', () => {
         });
 
       expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
-      ).toHaveBeenCalledWith(account);
+        counterfactualSafesDataSource.getCounterfactualSafesForAddress,
+      ).toHaveBeenCalledWith(address);
       expect(
-        counterfactualSafesDataSource.getCounterfactualSafesForAccount,
+        counterfactualSafesDataSource.getCounterfactualSafesForAddress,
       ).toHaveBeenCalledTimes(1);
     });
 
     it('should return an empty array if there are no Counterfactual Safes associated', async () => {
       const address = getAddress(faker.finance.ethereumAddress());
-      const chain = chainBuilder().build();
-      const authPayloadDto = authPayloadDtoBuilder()
-        .with('chain_id', chain.chainId)
-        .with('signer_address', address)
-        .build();
-      const accessToken = jwtService.sign(authPayloadDto);
-      const account = accountBuilder().build();
-      const accountDataTypes = [
-        accountDataTypeBuilder()
-          .with('name', AccountDataTypeNames.CounterfactualSafes)
-          .with('is_active', true)
-          .build(),
-      ];
-      accountsRepository.getAccount.mockResolvedValue(account);
-      accountsRepository.getDataTypes.mockResolvedValue(accountDataTypes);
-      accountsRepository.getAccountDataSettings.mockResolvedValue([
-        accountDataSettingBuilder()
-          .with('account_id', account.id)
-          .with('account_data_type_id', accountDataTypes[0].id)
-          .with('enabled', true)
-          .build(),
-      ]);
-      counterfactualSafesDataSource.getCounterfactualSafesForAccount.mockResolvedValue(
+      counterfactualSafesDataSource.getCounterfactualSafesForAddress.mockResolvedValue(
         [],
       );
 
       await request(app.getHttpServer())
         .get(`/v1/accounts/${address}/counterfactual-safes`)
-        .set('Cookie', [`access_token=${accessToken}`])
         .expect(200)
         .expect([]);
     });
@@ -577,7 +288,7 @@ describe('CounterfactualSafesController', () => {
       expect(
         counterfactualSafesDataSource.getCounterfactualSafe,
       ).toHaveBeenCalledWith({
-        account,
+        address,
         chainId: createCounterfactualSafeDto.chainId,
         predictedAddress: createCounterfactualSafeDto.predictedAddress,
       });
@@ -696,7 +407,7 @@ describe('CounterfactualSafesController', () => {
       expect(
         counterfactualSafesDataSource.getCounterfactualSafe,
       ).toHaveBeenCalledWith({
-        account,
+        address,
         chainId: createCounterfactualSafeDto.chainId,
         predictedAddress: createCounterfactualSafeDto.predictedAddress,
       });
@@ -856,8 +567,9 @@ describe('CounterfactualSafesController', () => {
         .expect(401);
 
       expect(accountsRepository.getAccount).not.toHaveBeenCalled();
-      expect(counterfactualSafesDataSource.deleteCounterfactualSafe).not
-        .toHaveBeenCalled;
+      expect(
+        counterfactualSafesDataSource.deleteCounterfactualSafe,
+      ).not.toHaveBeenCalled();
     });
 
     it('should not propagate a database error', async () => {

@@ -16,7 +16,7 @@ import { Event } from '@/routes/hooks/entities/event.entity';
 import {
   INotificationsRepositoryV2,
   NotificationsRepositoryV2Module,
-} from '@/domain/notifications/notifications.repository.v2.interface';
+} from '@/domain/notifications/v2/notifications.repository.interface';
 import { DeletedMultisigTransactionEvent } from '@/routes/hooks/entities/schemas/deleted-multisig-transaction.schema';
 import { ExecutedTransactionEvent } from '@/routes/hooks/entities/schemas/executed-transaction.schema';
 import { IncomingEtherEvent } from '@/routes/hooks/entities/schemas/incoming-ether.schema';
@@ -31,7 +31,7 @@ import {
   MessageConfirmationNotification,
   Notification,
   NotificationType,
-} from '@/domain/notifications/entities-v2/notification.entity';
+} from '@/domain/notifications/v2/entities/notification.entity';
 import {
   DelegatesV2RepositoryModule,
   IDelegatesV2Repository,
@@ -153,7 +153,7 @@ export class EventNotificationsHelper {
    */
   private async getRelevantSubscribers(event: EventToNotify): Promise<
     Array<{
-      subscriber: `0x${string}`;
+      subscriber: `0x${string}` | null;
       deviceUuid: UUID;
       cloudMessagingToken: string;
     }>
@@ -170,6 +170,10 @@ export class EventNotificationsHelper {
 
     const ownersAndDelegates = await Promise.allSettled(
       subscriptions.map(async (subscription) => {
+        if (!subscription.subscriber) {
+          return;
+        }
+
         const isOwnerOrDelegate = await this.isOwnerOrDelegate({
           chainId: event.chainId,
           safeAddress: event.address,
@@ -237,7 +241,7 @@ export class EventNotificationsHelper {
    */
   private async mapEventNotification(
     event: EventToNotify,
-    subscriber: `0x${string}`,
+    subscriber: `0x${string}` | null,
   ): Promise<Notification | null> {
     if (
       event.type === TransactionEventType.INCOMING_ETHER ||
@@ -247,11 +251,17 @@ export class EventNotificationsHelper {
     } else if (
       event.type === TransactionEventType.PENDING_MULTISIG_TRANSACTION
     ) {
+      if (!subscriber) {
+        return null;
+      }
       return await this.mapPendingMultisigTransactionEventNotification(
         event,
         subscriber,
       );
     } else if (event.type === TransactionEventType.MESSAGE_CREATED) {
+      if (!subscriber) {
+        return null;
+      }
       return await this.mapMessageCreatedEventNotification(event, subscriber);
     } else {
       return event;

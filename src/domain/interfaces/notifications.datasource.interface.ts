@@ -1,12 +1,12 @@
-import { UpsertSubscriptionsDto } from '@/routes/notifications/entities/upsert-subscriptions.dto.entity';
-import { NotificationType } from '@/domain/notifications/entities-v2/notification-type.entity';
-import { UUID } from 'crypto';
+import type { UpsertSubscriptionsDto } from '@/routes/notifications/v1/entities/upsert-subscriptions.dto.entity';
+import type { NotificationType } from '@/domain/notifications/v2/entities/notification-type.entity';
+import type { UUID } from 'crypto';
 
 export const INotificationsDatasource = Symbol('INotificationsDatasource');
 
 export interface INotificationsDatasource {
   upsertSubscriptions(args: {
-    signerAddress: `0x${string}`;
+    signerAddress?: `0x${string}`;
     upsertSubscriptionsDto: UpsertSubscriptionsDto;
   }): Promise<{
     deviceUuid: UUID;
@@ -24,7 +24,7 @@ export interface INotificationsDatasource {
     safeAddress: `0x${string}`;
   }): Promise<
     Array<{
-      subscriber: `0x${string}`;
+      subscriber: `0x${string}` | null;
       deviceUuid: UUID;
       cloudMessagingToken: string;
     }>
