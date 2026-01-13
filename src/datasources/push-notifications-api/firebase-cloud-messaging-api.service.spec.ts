@@ -1,8 +1,8 @@
 import { FakeConfigurationService } from '@/config/__tests__/fake.configuration.service';
 import { FakeCacheService } from '@/datasources/cache/__tests__/fake.cache.service';
 import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
-import type { HttpErrorFactory } from '@/datasources/errors/http-error-factory';
 import type { IJwtService } from '@/datasources/jwt/jwt.service.interface';
+import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
 import type { INetworkService } from '@/datasources/network/network.service.interface';
 import { firebaseNotificationBuilder } from '@/datasources/push-notifications-api/__tests__/firebase-notification.builder';
 import { FirebaseCloudMessagingApiService } from '@/datasources/push-notifications-api/firebase-cloud-messaging-api.service';
@@ -18,10 +18,6 @@ const mockJwtService = jest.mocked({
   sign: jest.fn(),
 } as jest.MockedObjectDeep<IJwtService>);
 
-const mockHttpErrorFactory = jest.mocked({
-  from: jest.fn(),
-} as jest.MockedObjectDeep<HttpErrorFactory>);
-
 describe('FirebaseCloudMessagingApiService', () => {
   let target: FirebaseCloudMessagingApiService;
   let fakeCacheService: FakeCacheService;
@@ -30,6 +26,7 @@ describe('FirebaseCloudMessagingApiService', () => {
   let pushNotificationsProject: string;
   let pushNotificationsServiceAccountClientEmail: string;
   let pushNotificationsServiceAccountPrivateKey: string;
+  let oauth2TokenTtlBufferInSeconds: number;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -38,6 +35,7 @@ describe('FirebaseCloudMessagingApiService', () => {
     pushNotificationsProject = faker.word.noun();
     pushNotificationsServiceAccountClientEmail = faker.internet.email();
     pushNotificationsServiceAccountPrivateKey = faker.string.alphanumeric();
+    oauth2TokenTtlBufferInSeconds = faker.number.int({ min: 30, max: 100 });
 
     const fakeConfigurationService = new FakeConfigurationService();
     fakeConfigurationService.set(
@@ -56,6 +54,10 @@ describe('FirebaseCloudMessagingApiService', () => {
       'pushNotifications.serviceAccount.privateKey',
       pushNotificationsServiceAccountPrivateKey,
     );
+    fakeConfigurationService.set(
+      'pushNotifications.oauth2TokenTtlBufferInSeconds',
+      oauth2TokenTtlBufferInSeconds,
+    );
 
     fakeCacheService = new FakeCacheService();
     target = new FirebaseCloudMessagingApiService(
@@ -63,7 +65,6 @@ describe('FirebaseCloudMessagingApiService', () => {
       fakeConfigurationService,
       fakeCacheService,
       mockJwtService,
-      mockHttpErrorFactory,
     );
   });
 
@@ -114,6 +115,9 @@ describe('FirebaseCloudMessagingApiService', () => {
               },
             },
           },
+          android: {
+            priority: 'high',
+          },
         },
       },
       networkRequest: {
@@ -163,6 +167,9 @@ describe('FirebaseCloudMessagingApiService', () => {
               },
             },
           },
+          android: {
+            priority: 'high',
+          },
         },
       },
       networkRequest: {
@@ -171,5 +178,48 @@ describe('FirebaseCloudMessagingApiService', () => {
         },
       },
     });
+  });
+
+  it('Should throw an error if the network request fails', async () => {
+    const oauth2AssertionJwt = faker.string.alphanumeric();
+    const oauth2Token = faker.string.alphanumeric();
+    const oauth2TokenExpiresIn = faker.number.int();
+    await fakeCacheService.hSet(
+      new CacheDir('firebase_oauth2_token', ''),
+      oauth2Token,
+      oauth2TokenExpiresIn,
+    );
+    const fcmToken = faker.string.alphanumeric();
+    const notification = firebaseNotificationBuilder().build();
+    const errorMessage = 'A Firebase error occurred';
+    mockJwtService.sign.mockReturnValue(oauth2AssertionJwt);
+    mockNetworkService.post.mockRejectedValueOnce(
+      new NetworkResponseError(
+        new URL(
+          `${pushNotificationsBaseUri}/${pushNotificationsProject}/messages:send`,
+        ),
+        {
+          status: 500,
+        } as Response,
+        { error_description: errorMessage },
+      ),
+    );
+
+    await expect(
+      target.enqueueNotification(fcmToken, notification),
+    ).rejects.toThrow(errorMessage);
+  });
+
+  it('Should throw an error if JWT generation fails', async () => {
+    const fcmToken = faker.string.alphanumeric();
+    const notification = firebaseNotificationBuilder().build();
+    const errorMessage = 'JWT error';
+    mockJwtService.sign.mockImplementationOnce(() => {
+      throw new Error(errorMessage);
+    });
+
+    await expect(
+      target.enqueueNotification(fcmToken, notification),
+    ).rejects.toThrow(errorMessage);
   });
 });

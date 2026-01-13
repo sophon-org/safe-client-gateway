@@ -1,13 +1,11 @@
 import { faker } from '@faker-js/faker';
 import { Builder } from '@/__tests__/builder';
-import { dataDecodedBuilder } from '@/domain/data-decoder/v1/entities/__tests__/data-decoded.builder';
 import {
   confirmationBuilder,
   toJson as confirmationToJson,
 } from '@/domain/safe/entities/__tests__/multisig-transaction-confirmation.builder';
 import { getSafeTxHash } from '@/domain/common/utils/safe';
 import { SignatureType } from '@/domain/common/entities/signature-type.entity';
-import { adjustEthSignSignature } from '@/domain/common/utils/signatures';
 import type {
   Confirmation,
   MultisigTransaction,
@@ -15,9 +13,11 @@ import type {
 import type { Safe } from '@/domain/safe/entities/safe.entity';
 import type { Operation } from '@/domain/safe/entities/operation.entity';
 import { getAddress, type PrivateKeyAccount } from 'viem';
+import { getSignature } from '@/domain/common/utils/__tests__/signatures.builder';
 
 const HASH_LENGTH = 32;
 
+// TODO: Refactor with multisig BuilderWithConfirmations
 class BuilderWithConfirmations<
   T extends MultisigTransaction,
 > extends Builder<T> {
@@ -25,7 +25,7 @@ class BuilderWithConfirmations<
     chainId: string;
     safe: Safe;
     signers: Array<PrivateKeyAccount>;
-    signatureType?: SignatureType.Eoa | SignatureType.EthSign;
+    signatureType?: SignatureType;
   }): Promise<T> {
     const areAllOwners = args.signers.every((signer) => {
       return args.safe.owners.includes(signer.address);
@@ -48,22 +48,13 @@ class BuilderWithConfirmations<
 
     transaction.confirmations = await Promise.all(
       args.signers.map(async (signer): Promise<Confirmation> => {
-        const signatureType: SignatureType =
-          args.signatureType ??
-          faker.helpers.arrayElement([
-            SignatureType.Eoa,
-            SignatureType.EthSign,
-          ]);
-
-        let signature: `0x${string}`;
-
-        if (signatureType === SignatureType.Eoa) {
-          signature = await signer.sign({ hash: transaction.safeTxHash });
-        } else {
-          signature = await signer
-            .signMessage({ message: { raw: transaction.safeTxHash } })
-            .then(adjustEthSignSignature);
-        }
+        const signatureType =
+          args.signatureType ?? faker.helpers.enumValue(SignatureType);
+        const signature = await getSignature({
+          signer,
+          hash: transaction.safeTxHash,
+          signatureType,
+        });
 
         return {
           owner: signer.address,
@@ -87,7 +78,6 @@ export function multisigTransactionBuilder(): BuilderWithConfirmations<MultisigT
       .with('blockNumber', faker.number.int())
       .with('confirmationsRequired', faker.number.int())
       .with('data', faker.string.hexadecimal() as `0x${string}`)
-      .with('dataDecoded', dataDecodedBuilder().build())
       .with('ethGasPrice', faker.string.numeric())
       .with('executor', getAddress(faker.finance.ethereumAddress()))
       .with('executionDate', faker.date.recent())

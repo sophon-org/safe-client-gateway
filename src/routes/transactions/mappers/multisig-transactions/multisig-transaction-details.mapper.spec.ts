@@ -18,7 +18,9 @@ import { TransactionVerifierHelper } from '@/routes/transactions/helpers/transac
 import type { DelegatesV2Repository } from '@/domain/delegate/v2/delegates.v2.repository';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import type { ILoggingService } from '@/logging/logging.interface';
-import { SignatureType } from '@/domain/common/entities/signature-type.entity';
+import type { IContractsRepository } from '@/domain/contracts/contracts.repository.interface';
+import { Operation } from '@/domain/safe/entities/operation.entity';
+import { dataDecodedBuilder } from '@/domain/data-decoder/v2/entities/__tests__/data-decoded.builder';
 
 const addressInfoHelper = jest.mocked({
   getOrDefault: jest.fn(),
@@ -35,6 +37,7 @@ const transactionInfoMapper = jest.mocked({
 const transactionDataMapper = jest.mocked({
   isTrustedDelegateCall: jest.fn(),
   buildAddressInfoIndex: jest.fn(),
+  buildTokenInfoIndex: jest.fn(),
 } as jest.MockedObjectDeep<TransactionDataMapper>);
 
 const safeAppInfoMapper = jest.mocked({
@@ -61,17 +64,25 @@ const mockLoggingService = {
   error: jest.fn(),
 } as jest.MockedObjectDeep<ILoggingService>;
 
+const mockContractsRepository = jest.mocked({
+  isTrustedForDelegateCall: jest.fn(),
+} as jest.MockedObjectDeep<IContractsRepository>);
+
 describe('MultisigTransactionDetails mapper (Unit)', () => {
   let mapper: MultisigTransactionDetailsMapper;
 
-  function initTarget(ethSign: boolean): void {
+  function initTarget(args: {
+    ethSign: boolean;
+    blocklist: Array<`0x${string}`>;
+  }): void {
     mockConfigurationService.getOrThrow.mockImplementation((key) => {
+      if (key === 'blockchain.blocklist') return args.blocklist;
       return [
         'features.hashVerification.api',
         'features.signatureVerification.api',
         'features.hashVerification.proposal',
         'features.signatureVerification.proposal',
-        ethSign ? 'features.ethSign' : null,
+        args.ethSign ? 'features.ethSign' : null,
       ].includes(key);
     });
     mapper = new MultisigTransactionDetailsMapper(
@@ -86,6 +97,7 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
         mockConfigurationService,
         mockDelegatesRepository,
         mockLoggingService,
+        mockContractsRepository,
       ),
     );
   }
@@ -93,7 +105,7 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
   beforeEach(() => {
     jest.resetAllMocks();
 
-    initTarget(true);
+    initTarget({ ethSign: true, blocklist: [] });
   });
 
   it('should return a TransactionDetails object with null addressInfoIndex', async () => {
@@ -104,11 +116,14 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
     const transaction = await multisigTransactionBuilder()
       .with('safe', safe.address)
       .with('isExecuted', false)
+      .with('nonce', safe.nonce)
+      .with('operation', Operation.CALL)
       .buildWithConfirmations({
         chainId,
         safe,
         signers: [signer],
       });
+    const dataDecoded = dataDecodedBuilder().build();
     const txStatus = faker.helpers.objectValue(TransactionStatus);
     statusMapper.mapTransactionStatus.mockReturnValue(txStatus);
     const txInfo = transferTransactionInfoBuilder().build();
@@ -124,7 +139,12 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
     const to = addressInfoBuilder().build();
     addressInfoHelper.getOrDefault.mockResolvedValue(to);
 
-    const actual = await mapper.mapDetails(chainId, transaction, safe);
+    const actual = await mapper.mapDetails(
+      chainId,
+      transaction,
+      safe,
+      dataDecoded,
+    );
 
     expect(actual).toEqual({
       safeAddress: safe.address,
@@ -134,12 +154,13 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
       txInfo,
       txData: expect.objectContaining({
         hexData: transaction.data,
-        dataDecoded: transaction.dataDecoded,
+        dataDecoded,
         to,
         value: transaction.value,
         operation: transaction.operation,
         trustedDelegateCallTarget: true,
         addressInfoIndex: null,
+        tokenInfoIndex: null,
       }),
       txHash: transaction.transactionHash,
       detailedExecutionInfo: multisigExecutionDetails,
@@ -155,11 +176,14 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
     const transaction = await multisigTransactionBuilder()
       .with('safe', safe.address)
       .with('isExecuted', false)
+      .with('nonce', safe.nonce)
+      .with('operation', Operation.CALL)
       .buildWithConfirmations({
         chainId,
         safe,
         signers: [signer],
       });
+    const dataDecoded = dataDecodedBuilder().build();
     const txStatus = faker.helpers.objectValue(TransactionStatus);
     statusMapper.mapTransactionStatus.mockReturnValue(txStatus);
     const txInfo = transferTransactionInfoBuilder().build();
@@ -181,7 +205,12 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
     const to = addressInfoBuilder().build();
     addressInfoHelper.getOrDefault.mockResolvedValue(to);
 
-    const actual = await mapper.mapDetails(chainId, transaction, safe);
+    const actual = await mapper.mapDetails(
+      chainId,
+      transaction,
+      safe,
+      dataDecoded,
+    );
 
     expect(actual).toEqual({
       safeAddress: safe.address,
@@ -191,7 +220,7 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
       txInfo,
       txData: expect.objectContaining({
         hexData: transaction.data,
-        dataDecoded: transaction.dataDecoded,
+        dataDecoded,
         to,
         value: transaction.value,
         operation: transaction.operation,
@@ -202,27 +231,5 @@ describe('MultisigTransactionDetails mapper (Unit)', () => {
       detailedExecutionInfo: multisigExecutionDetails,
       safeAppInfo,
     });
-  });
-
-  it('should block eth_sign', async () => {
-    initTarget(false);
-
-    const chainId = faker.string.numeric();
-    const privateKey = generatePrivateKey();
-    const signer = privateKeyToAccount(privateKey);
-    const safe = safeBuilder().with('owners', [signer.address]).build();
-    const transaction = await multisigTransactionBuilder()
-      .with('safe', safe.address)
-      .with('isExecuted', false)
-      .buildWithConfirmations({
-        chainId,
-        safe,
-        signers: [signer],
-        signatureType: SignatureType.EthSign,
-      });
-
-    await expect(mapper.mapDetails(chainId, transaction, safe)).rejects.toThrow(
-      'eth_sign is disabled',
-    );
   });
 });

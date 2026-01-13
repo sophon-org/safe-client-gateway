@@ -17,6 +17,7 @@ import { MultisigTransactionExecutionDetailsMapper } from '@/routes/transactions
 import { MultisigTransactionStatusMapper } from '@/routes/transactions/mappers/multisig-transactions/multisig-transaction-status.mapper';
 import { MultisigTransactionNoteMapper } from '@/routes/transactions/mappers/multisig-transactions/multisig-transaction-note.mapper';
 import { TransactionVerifierHelper } from '@/routes/transactions/helpers/transaction-verifier.helper';
+import { DataDecoded } from '@/domain/data-decoder/v2/entities/data-decoded.entity';
 
 @Injectable()
 export class MultisigTransactionDetailsMapper {
@@ -35,9 +36,10 @@ export class MultisigTransactionDetailsMapper {
     chainId: string,
     transaction: MultisigTransaction,
     safe: Safe,
+    dataDecoded: DataDecoded | null,
   ): Promise<TransactionDetails> {
     // TODO: This should be located on the domain layer but only route layer exists
-    await this.transactionVerifier.verifyApiTransaction({
+    this.transactionVerifier.verifyApiTransaction({
       chainId,
       safe,
       transaction,
@@ -52,25 +54,32 @@ export class MultisigTransactionDetailsMapper {
       txInfo,
       detailedExecutionInfo,
       recipientAddressInfo,
+      tokenInfoIndex,
     ] = await Promise.all([
       this.transactionDataMapper.isTrustedDelegateCall(
         chainId,
         transaction.operation,
         transaction.to,
-        transaction.dataDecoded,
+        dataDecoded,
       ),
-      this.transactionDataMapper.buildAddressInfoIndex(
-        chainId,
-        transaction.dataDecoded,
-      ),
+      this.transactionDataMapper.buildAddressInfoIndex(chainId, dataDecoded),
       this.safeAppInfoMapper.mapSafeAppInfo(chainId, transaction),
-      this.transactionInfoMapper.mapTransactionInfo(chainId, transaction),
+      this.transactionInfoMapper.mapTransactionInfo(
+        chainId,
+        transaction,
+        dataDecoded,
+      ),
       this.multisigTransactionExecutionDetailsMapper.mapMultisigExecutionDetails(
         chainId,
         transaction,
         safe,
       ),
       this._getRecipientAddressInfo(chainId, transaction.to),
+      this.transactionDataMapper.buildTokenInfoIndex({
+        chainId,
+        safeAddress: transaction.safe,
+        dataDecoded,
+      }),
     ]);
 
     return {
@@ -81,12 +90,13 @@ export class MultisigTransactionDetailsMapper {
       txInfo,
       txData: new TransactionData(
         transaction.data,
-        transaction.dataDecoded,
+        dataDecoded,
         recipientAddressInfo,
         transaction.value,
         transaction.operation,
         isTrustedDelegateCall,
         isEmpty(addressInfoIndex) ? null : addressInfoIndex,
+        isEmpty(tokenInfoIndex) ? null : tokenInfoIndex,
       ),
       txHash: transaction.transactionHash,
       detailedExecutionInfo,

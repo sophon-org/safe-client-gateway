@@ -12,7 +12,7 @@ import { IDelegatesV2Repository } from '@/domain/delegate/v2/delegates.v2.reposi
 import { IMessagesRepository } from '@/domain/messages/messages.repository.interface';
 import { ISafeAppsRepository } from '@/domain/safe-apps/safe-apps.repository.interface';
 import { ISafeRepository } from '@/domain/safe/safe.repository.interface';
-import { IStakingRepository } from '@/domain/staking/staking.repository.interface';
+import { IStakingRepositoryWithRewardsFee } from '@/domain/staking/staking.repository.interface';
 import { ITransactionsRepository } from '@/domain/transactions/transactions.repository.interface';
 import { ILoggingService, LoggingService } from '@/logging/logging.interface';
 import {
@@ -24,6 +24,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import memoize from 'lodash/memoize';
 import type { MemoizedFunction } from 'lodash';
+import { EarnRepository } from '@/domain/earn/earn.repository';
 
 @Injectable()
 export class EventCacheHelper {
@@ -50,8 +51,10 @@ export class EventCacheHelper {
     private readonly safeAppsRepository: ISafeAppsRepository,
     @Inject(ISafeRepository)
     private readonly safeRepository: ISafeRepository,
-    @Inject(IStakingRepository)
-    private readonly stakingRepository: IStakingRepository,
+    @Inject(IStakingRepositoryWithRewardsFee)
+    private readonly stakingRepository: IStakingRepositoryWithRewardsFee,
+    @Inject(EarnRepository)
+    private readonly earnRepository: EarnRepository,
     @Inject(ITransactionsRepository)
     private readonly transactionsRepository: ITransactionsRepository,
     @Inject(LoggingService)
@@ -165,7 +168,7 @@ export class EventCacheHelper {
    * Logs the number of unsupported chain events for each chain and clears the store.
    * This function is public just for testing purposes.
    */
-  @Cron(CronExpression.EVERY_MINUTE, {
+  @Cron(CronExpression.EVERY_30_SECONDS, {
     disabled: process.env.NODE_ENV === 'test',
   })
   public async logUnsupportedEvents(): Promise<void> {
@@ -184,6 +187,15 @@ export class EventCacheHelper {
       }),
     );
     this.unsupportedChains = [];
+  }
+
+  @Cron(CronExpression.EVERY_30_SECONDS, {
+    disabled: process.env.NODE_ENV === 'test',
+  })
+  public clearSupportedChainsMemo(): void {
+    if (this.isSupportedChainMemo.cache.clear) {
+      this.isSupportedChainMemo.cache.clear();
+    }
   }
 
   // Transaction Service events
@@ -247,6 +259,10 @@ export class EventCacheHelper {
         chainId: event.chainId,
         safeAddress: event.address,
       }),
+      this.earnRepository.clearStakes({
+        chainId: event.chainId,
+        safeAddress: event.address,
+      }),
       this.safeRepository.clearModuleTransactions({
         chainId: event.chainId,
         safeAddress: event.address,
@@ -298,6 +314,10 @@ export class EventCacheHelper {
         address: event.address,
       }),
       this.stakingRepository.clearStakes({
+        chainId: event.chainId,
+        safeAddress: event.address,
+      }),
+      this.earnRepository.clearStakes({
         chainId: event.chainId,
         safeAddress: event.address,
       }),
@@ -502,6 +522,7 @@ export class EventCacheHelper {
         this.blockchainRepository.clearApi(event.chainId);
         // Testnet status may have changed
         this.stakingRepository.clearApi(event.chainId);
+        this.earnRepository.clearApi(event.chainId);
         // Transaction Service may have changed
         this.transactionsRepository.clearApi(event.chainId);
         this.balancesRepository.clearApi(event.chainId);

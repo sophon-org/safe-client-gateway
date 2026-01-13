@@ -3,7 +3,8 @@ import { multisigTransactionBuilder } from '@/domain/safe/entities/__tests__/mul
 import {
   dataDecodedBuilder,
   dataDecodedParameterBuilder,
-} from '@/domain/data-decoder/v1/entities/__tests__/data-decoded.builder';
+  multisendBuilder,
+} from '@/domain/data-decoder/v2/entities/__tests__/data-decoded.builder';
 import type { AddressInfoHelper } from '@/routes/common/address-info/address-info.helper';
 import { NULL_ADDRESS } from '@/routes/common/constants';
 import { AddressInfo } from '@/routes/common/entities/address-info.entity';
@@ -28,15 +29,15 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
     addressInfoHelper.getOrDefault.mockResolvedValue(toAddress);
     const dataSize = faker.number.int();
     const chainId = faker.string.numeric();
-    const transaction = multisigTransactionBuilder()
-      .with('dataDecoded', dataDecodedBuilder().build())
-      .build();
+    const transaction = multisigTransactionBuilder().build();
+    const dataDecoded = dataDecodedBuilder().build();
 
     const customTransaction = await mapper.mapCustomTransaction(
       transaction,
       dataSize,
       chainId,
       null,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);
@@ -44,7 +45,7 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
       to: toAddress,
       dataSize: dataSize.toString(),
       value: transaction.value,
-      methodName: transaction.dataDecoded?.method,
+      methodName: dataDecoded.method,
       actionCount: null,
       isCancellation: false,
     });
@@ -57,14 +58,15 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
     const chainId = faker.string.numeric();
     const transaction = multisigTransactionBuilder()
       .with('value', '1000000000000000000000000') // 1e+24
-      .with('dataDecoded', dataDecodedBuilder().build())
       .build();
+    const dataDecoded = dataDecodedBuilder().build();
 
     const customTransaction = await mapper.mapCustomTransaction(
       transaction,
       dataSize,
       chainId,
       null,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);
@@ -72,7 +74,7 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
       to: toAddress,
       dataSize: dataSize.toString(),
       value: transaction.value,
-      methodName: transaction.dataDecoded?.method,
+      methodName: dataDecoded.method,
       actionCount: null,
       isCancellation: false,
     });
@@ -84,15 +86,15 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
     const method = 'multiSend';
     const dataSize = faker.number.int();
     const chainId = faker.string.numeric();
-    const transaction = multisigTransactionBuilder()
-      .with('dataDecoded', dataDecodedBuilder().with('method', method).build())
-      .build();
+    const transaction = multisigTransactionBuilder().build();
+    const dataDecoded = dataDecodedBuilder().with('method', method).build();
 
     const customTransaction = await mapper.mapCustomTransaction(
       transaction,
       dataSize,
       chainId,
       null,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);
@@ -112,23 +114,23 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
     const method = 'multiSend';
     const dataSize = faker.number.int();
     const chainId = faker.string.numeric();
-    const transaction = multisigTransactionBuilder()
-      .with(
-        'dataDecoded',
-        dataDecodedBuilder()
-          .with('method', method)
-          .with('parameters', [
-            dataDecodedParameterBuilder()
-              .with('name', 'transactions')
-              .with('value', [
-                faker.string.alphanumeric(),
-                faker.string.alphanumeric(),
-              ])
-              .with('valueDecoded', [{ one: 1 }, { two: 2 }, { three: 3 }])
-              .build(),
+    const transaction = multisigTransactionBuilder().build();
+    const dataDecoded = dataDecodedBuilder()
+      .with('method', method)
+      .with('parameters', [
+        dataDecodedParameterBuilder()
+          .with('name', 'transactions')
+          .with('value', [
+            faker.string.alphanumeric(),
+            faker.string.alphanumeric(),
+          ])
+          .with('valueDecoded', [
+            multisendBuilder().build(),
+            multisendBuilder().build(),
+            multisendBuilder().build(),
           ])
           .build(),
-      )
+      ])
       .build();
 
     const customTransaction = await mapper.mapCustomTransaction(
@@ -136,6 +138,7 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
       dataSize,
       chainId,
       null,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);
@@ -166,14 +169,15 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
       .with('gasToken', NULL_ADDRESS)
       .with('refundReceiver', NULL_ADDRESS)
       .with('safeTxGas', 0)
-      .with('dataDecoded', dataDecodedBuilder().with('method', method).build())
       .build();
+    const dataDecoded = dataDecodedBuilder().with('method', method).build();
 
     const customTransaction = await mapper.mapCustomTransaction(
       transaction,
       dataSize,
       chainId,
       null,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);
@@ -194,12 +198,14 @@ describe('Multisig Custom Transaction mapper (Unit)', () => {
     const chainId = faker.string.numeric();
     const transaction = multisigTransactionBuilder().build();
     const humanDescription = 'Send 10 ETH to vitalik.eth';
+    const dataDecoded = dataDecodedBuilder().build();
 
     const customTransaction = await mapper.mapCustomTransaction(
       transaction,
       dataSize,
       chainId,
       humanDescription,
+      dataDecoded,
     );
 
     expect(customTransaction).toBeInstanceOf(CustomTransactionInfo);

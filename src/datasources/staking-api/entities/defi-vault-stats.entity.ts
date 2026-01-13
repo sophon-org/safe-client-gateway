@@ -14,7 +14,17 @@ export const DefiVaultStatsChains = [
   'bsc',
   'matic',
   'op',
+  'base',
 ] as const;
+
+export const DefiVaultStatsAdditionalRewardSchema = z.object({
+  asset: AddressSchema,
+  nrr: z.number(),
+});
+
+export type DefiVaultStatsAdditionalReward = z.infer<
+  typeof DefiVaultStatsAdditionalRewardSchema
+>;
 
 export const DefiVaultStatsSchema = z.object({
   asset: AddressSchema,
@@ -33,6 +43,12 @@ export const DefiVaultStatsSchema = z.object({
   chain_id: z.number(),
   asset_decimals: z.number(),
   updated_at_block: z.number(),
+  performance_fee: z.number(),
+  additional_rewards_nrr: z.number(),
+  additional_rewards: z
+    .array(DefiVaultStatsAdditionalRewardSchema)
+    .nullish()
+    .default(null),
 });
 
 export const DefiVaultsStateSchema = z.array(DefiVaultStatsSchema);

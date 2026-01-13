@@ -74,43 +74,42 @@ describe('DeploymentSchema', () => {
     );
   });
 
-  it('should allow numeric string product_fee values', () => {
-    const deployment = deploymentBuilder()
-      .with('product_fee', faker.string.numeric())
-      .build();
+  it('should default external_links to null', () => {
+    const deployment = deploymentBuilder().build();
+    // @ts-expect-error - inferred type does not allow undefined
+    delete deployment.external_links;
+    const result = DeploymentSchema.safeParse(deployment);
+    expect(result.success && result.data.external_links).toBe(null);
+  });
+
+  it('should default external_links.deposit_url to null', () => {
+    const deployment = deploymentBuilder().build();
+    // @ts-expect-error - inferred type does not allow undefined
+    delete deployment.external_links?.deposit_url;
 
     const result = DeploymentSchema.safeParse(deployment);
 
-    expect(result.success && result.data.product_fee).toBe(
-      deployment.product_fee,
+    expect(result.success && result.data.external_links?.deposit_url).toBe(
+      null,
     );
   });
 
-  it('should not allow numeric product_fee values', () => {
+  it('should not allow a non-URL external_links.deposit_url', () => {
     const deployment = deploymentBuilder()
-      .with('product_fee', faker.number.float() as unknown as string)
+      .with('external_links', {
+        deposit_url: faker.string.numeric(),
+      })
       .build();
 
     const result = DeploymentSchema.safeParse(deployment);
 
     expect(!result.success && result.error.issues.length).toBe(1);
     expect(!result.success && result.error.issues[0]).toStrictEqual({
-      code: 'invalid_type',
-      expected: 'string',
-      message: 'Expected string, received number',
-      path: ['product_fee'],
-      received: 'number',
+      code: 'invalid_string',
+      message: 'Invalid url',
+      path: ['external_links', 'deposit_url'],
+      validation: 'url',
     });
-  });
-
-  it('should default product_fee to null', () => {
-    const deployment = deploymentBuilder().build();
-    // @ts-expect-error - inferred type does not allow undefined
-    delete deployment.product_fee;
-
-    const result = DeploymentSchema.safeParse(deployment);
-
-    expect(result.success && result.data.product_fee).toBe(null);
   });
 
   it.each([

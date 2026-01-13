@@ -19,14 +19,23 @@ export const RootConfigurationSchema = z
     EMAIL_TEMPLATE_RECOVERY_TX: z.string(),
     EMAIL_TEMPLATE_UNKNOWN_RECOVERY_TX: z.string(),
     EMAIL_TEMPLATE_VERIFICATION_CODE: z.string(),
+    EXPIRATION_DEVIATE_PERCENT: z
+      .number({ coerce: true })
+      .min(0)
+      .max(100)
+      .optional(),
     FINGERPRINT_ENCRYPTION_KEY: z.string(),
     INFURA_API_KEY: z.string(),
     JWT_ISSUER: z.string(),
     JWT_SECRET: z.string(),
-    // PORTFOLIO_API_KEY: z.string(),
     PUSH_NOTIFICATIONS_API_PROJECT: z.string(),
     PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_CLIENT_EMAIL: z.string().email(),
     PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY: z.string(),
+    PUSH_NOTIFICATIONS_API_OAUTH2_TOKEN_TTL_BUFFER_IN_SECONDS: z
+      .number({ coerce: true })
+      .min(1)
+      .max(3599)
+      .optional(),
     RELAY_PROVIDER_API_KEY_OPTIMISM: z.string(),
     RELAY_PROVIDER_API_KEY_BSC: z.string(),
     RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN: z.string(),
@@ -41,6 +50,9 @@ export const RootConfigurationSchema = z
     STAKING_API_KEY: z.string(),
     STAKING_TESTNET_API_KEY: z.string(),
     TARGETED_MESSAGING_FILE_STORAGE_TYPE: z.enum(['local', 'aws']).optional(),
+    CSV_EXPORT_FILE_STORAGE_TYPE: z.enum(['local', 'aws']).optional(),
+    CSV_AWS_ACCESS_KEY_ID: z.string().optional(),
+    CSV_AWS_SECRET_ACCESS_KEY: z.string().optional(),
   })
   .superRefine((config, ctx) =>
     // Check for AWS_* fields in production and staging environments
@@ -49,6 +61,8 @@ export const RootConfigurationSchema = z
       'AWS_KMS_ENCRYPTION_KEY_ID',
       'AWS_SECRET_ACCESS_KEY',
       'AWS_REGION',
+      'CSV_AWS_ACCESS_KEY_ID',
+      'CSV_AWS_SECRET_ACCESS_KEY',
     ].forEach((field) => {
       if (
         config.CGW_ENV &&

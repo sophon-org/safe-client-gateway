@@ -15,7 +15,10 @@ import { IPricesApi } from '@/datasources/balances-api/prices-api.interface';
 import { Injectable } from '@nestjs/common';
 import { Chain } from '@/domain/chains/entities/chain.entity';
 import { rawify, type Raw } from '@/validation/entities/raw.entity';
-import { AssetPricesSchema } from '@/datasources/balances-api/entities/asset-price.entity';
+import {
+  AssetPrice,
+  getAssetPricesSchema,
+} from '@/datasources/balances-api/entities/asset-price.entity';
 import { ZodError } from 'zod';
 
 @Injectable()
@@ -23,7 +26,8 @@ export class SafeBalancesApi implements IBalancesApi {
   private readonly defaultExpirationTimeInSeconds: number;
   private readonly defaultNotFoundExpirationTimeSeconds: number;
   private static readonly DEFAULT_DECIMALS = 18;
-  private static readonly HOLESKY_CHAIN_ID = '17000';
+  private static readonly HOODI_CHAIN_ID = '560048';
+  private static readonly BASE_CHAIN_ID = '8453';
 
   constructor(
     private readonly chainId: string,
@@ -34,14 +38,20 @@ export class SafeBalancesApi implements IBalancesApi {
     private readonly httpErrorFactory: HttpErrorFactory,
     private readonly coingeckoApi: IPricesApi,
   ) {
-    // TODO: Remove temporary cache times for Holesky chain.
-    if (chainId === SafeBalancesApi.HOLESKY_CHAIN_ID) {
-      const holeskyExpirationTime =
-        this.configurationService.getOrThrow<number>(
-          'expirationTimeInSeconds.holesky',
-        );
-      this.defaultExpirationTimeInSeconds = holeskyExpirationTime;
-      this.defaultNotFoundExpirationTimeSeconds = holeskyExpirationTime;
+    const isProduction = this.configurationService.getOrThrow<boolean>(
+      'application.isProduction',
+    );
+    // TODO: Remove temporary cache times for Hoodi chain.
+    if (
+      chainId === SafeBalancesApi.HOODI_CHAIN_ID ||
+      // TODO: Remove after Vault decoding has been released
+      (!isProduction && chainId === SafeBalancesApi.BASE_CHAIN_ID)
+    ) {
+      const hoodiExpirationTime = this.configurationService.getOrThrow<number>(
+        'expirationTimeInSeconds.hoodi',
+      );
+      this.defaultExpirationTimeInSeconds = hoodiExpirationTime;
+      this.defaultNotFoundExpirationTimeSeconds = hoodiExpirationTime;
     } else {
       this.defaultExpirationTimeInSeconds =
         this.configurationService.getOrThrow<number>(
@@ -151,10 +161,12 @@ export class SafeBalancesApi implements IBalancesApi {
    * Gets the USD price of the native coin of the chain associated with {@link chainId}.
    */
   async getNativeCoinPrice(chain: Chain): Promise<number | null> {
-    return this.coingeckoApi.getNativeCoinPrice({
+    const fiatCode = 'USD';
+    const asset = await this.coingeckoApi.getNativeCoinPrice({
       chain,
-      fiatCode: 'USD',
+      fiatCode,
     });
+    return asset?.[fiatCode.toLowerCase()] ?? null;
   }
 
   private async _mapBalances(args: {
@@ -166,13 +178,14 @@ export class SafeBalancesApi implements IBalancesApi {
       .map((balance) => balance.tokenAddress)
       .filter((address): address is `0x${string}` => address !== null);
 
+    const lowerCaseFiatCode = args.fiatCode.toLowerCase();
     const assetPrices = await this.coingeckoApi
       .getTokenPrices({
         chain: args.chain,
         fiatCode: args.fiatCode,
         tokenAddresses,
       })
-      .then(AssetPricesSchema.parse);
+      .then(getAssetPricesSchema(lowerCaseFiatCode).parse);
 
     const lowerCaseAssetPrices = assetPrices.map((assetPrice) =>
       Object.fromEntries(
@@ -183,9 +196,9 @@ export class SafeBalancesApi implements IBalancesApi {
     const balances = await Promise.all(
       args.balances.map(async (balance) => {
         const tokenAddress = balance.tokenAddress?.toLowerCase() ?? null;
-        let price: number | null;
+        let asset: AssetPrice[string] | null;
         if (tokenAddress === null) {
-          price = await this.coingeckoApi.getNativeCoinPrice({
+          asset = await this.coingeckoApi.getNativeCoinPrice({
             chain: args.chain,
             fiatCode: args.fiatCode,
           });
@@ -193,12 +206,17 @@ export class SafeBalancesApi implements IBalancesApi {
           const found = lowerCaseAssetPrices.find(
             (assetPrice) => assetPrice[tokenAddress],
           );
-          price = found?.[tokenAddress]?.[args.fiatCode.toLowerCase()] ?? null;
+          asset = found?.[tokenAddress] ?? null;
         }
+
+        const price = asset?.[lowerCaseFiatCode] ?? null;
         const fiatBalance = this._getFiatBalance(price, balance);
+        const fiatBalance24hChange =
+          asset?.[`${lowerCaseFiatCode}_24h_change`] ?? null;
         return {
           ...balance,
           fiatBalance: fiatBalance ? getNumberString(fiatBalance) : null,
+          fiatBalance24hChange,
           fiatConversion: price ? getNumberString(price) : null,
         };
       }),

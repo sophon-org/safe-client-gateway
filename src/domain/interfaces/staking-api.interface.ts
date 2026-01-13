@@ -6,11 +6,16 @@ import type { DefiVaultStats } from '@/datasources/staking-api/entities/defi-vau
 import type { Stake } from '@/datasources/staking-api/entities/stake.entity';
 import type { TransactionStatus } from '@/datasources/staking-api/entities/transaction-status.entity';
 import type { Raw } from '@/validation/entities/raw.entity';
+import type { DefiVaultStake } from '@/datasources/staking-api/entities/defi-vault-stake.entity';
+import type { DefiMorphoExtraReward } from '@/datasources/staking-api/entities/defi-morpho-extra-reward.entity';
+import type { RewardsFee } from '@/datasources/staking-api/entities/rewards-fee.entity';
 
 export const IStakingApi = Symbol('IStakingApi');
 
 export interface IStakingApi {
   getDeployments(): Promise<Raw<Array<Deployment>>>;
+
+  getRewardsFee(contract: `0x${string}`): Promise<Raw<RewardsFee>>;
 
   getNetworkStats(): Promise<Raw<NetworkStats>>;
 
@@ -19,6 +24,15 @@ export interface IStakingApi {
   getPooledStakingStats(pool: `0x${string}`): Promise<Raw<PooledStakingStats>>;
 
   getDefiVaultStats(vault: `0x${string}`): Promise<Raw<Array<DefiVaultStats>>>;
+
+  getDefiVaultStakes(args: {
+    safeAddress: `0x${string}`;
+    vault: `0x${string}`;
+  }): Promise<Raw<Array<DefiVaultStake>>>;
+
+  getDefiMorphoExtraRewards(
+    safeAddress: `0x${string}`,
+  ): Promise<Raw<Array<DefiMorphoExtraReward>>>;
 
   getStakes(args: {
     safeAddress: `0x${string}`;

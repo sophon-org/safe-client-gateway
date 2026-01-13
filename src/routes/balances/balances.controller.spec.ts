@@ -1,35 +1,19 @@
 import { TestAppProvider } from '@/__tests__/test-app.provider';
-import { AppModule } from '@/app.module';
+import { createTestModule } from '@/__tests__/testing-module';
 import { IConfigurationService } from '@/config/configuration.service.interface';
 import configuration from '@/config/entities/__tests__/configuration';
-import { TestCacheModule } from '@/datasources/cache/__tests__/test.cache.module';
-import { CacheModule } from '@/datasources/cache/cache.module';
-import { TestPostgresDatabaseModule } from '@/datasources/db/__tests__/test.postgres-database.module';
-import { PostgresDatabaseModule } from '@/datasources/db/v1/postgres-database.module';
-import { PostgresDatabaseModuleV2 } from '@/datasources/db/v2/postgres-database.module';
-import { TestPostgresDatabaseModuleV2 } from '@/datasources/db/v2/test.postgres-database.module';
-import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
 import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
-import { NetworkModule } from '@/datasources/network/network.module';
 import type { INetworkService } from '@/datasources/network/network.service.interface';
 import { NetworkService } from '@/datasources/network/network.service.interface';
-import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
-import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
-import { TestTargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/__tests__/test.targeted-messaging.datasource.module';
-import { TargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/targeted-messaging.datasource.module';
 import { balanceBuilder } from '@/domain/balances/entities/__tests__/balance.builder';
 import { balanceTokenBuilder } from '@/domain/balances/entities/__tests__/balance.token.builder';
 import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
 import { pricesProviderBuilder } from '@/domain/chains/entities/__tests__/prices-provider.builder';
 import { safeBuilder } from '@/domain/safe/entities/__tests__/safe.builder';
-import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
-import { RequestScopedLoggingModule } from '@/logging/logging.module';
 import { NULL_ADDRESS } from '@/routes/common/constants';
 import { rawify } from '@/validation/entities/raw.entity';
 import { faker } from '@faker-js/faker';
 import type { INestApplication } from '@nestjs/common';
-import type { TestingModule } from '@nestjs/testing';
-import { Test } from '@nestjs/testing';
 import type { Server } from 'net';
 import request from 'supertest';
 import { getAddress } from 'viem';
@@ -52,24 +36,7 @@ describe('Balances Controller (Unit)', () => {
       },
     });
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule.register(testConfiguration)],
-    })
-      .overrideModule(PostgresDatabaseModule)
-      .useModule(TestPostgresDatabaseModule)
-      .overrideModule(TargetedMessagingDatasourceModule)
-      .useModule(TestTargetedMessagingDatasourceModule)
-      .overrideModule(CacheModule)
-      .useModule(TestCacheModule)
-      .overrideModule(RequestScopedLoggingModule)
-      .useModule(TestLoggingModule)
-      .overrideModule(NetworkModule)
-      .useModule(TestNetworkModule)
-      .overrideModule(QueuesApiModule)
-      .useModule(TestQueuesApiModule)
-      .overrideModule(PostgresDatabaseModuleV2)
-      .useModule(TestPostgresDatabaseModuleV2)
-      .compile();
+    const moduleFixture = await createTestModule({ config: testConfiguration });
 
     const configurationService = moduleFixture.get<IConfigurationService>(
       IConfigurationService,
@@ -118,11 +85,18 @@ describe('Balances Controller (Unit)', () => {
       const nativeCoinPriceProviderResponse = {
         [chain.pricesProvider.nativeCoin!]: {
           [currency.toLowerCase()]: 1536.75,
+          [`${currency.toLowerCase()}_24h_change`]: 1.6942,
         },
       };
       const tokenPriceProviderResponse = {
-        [tokenAddress]: { [currency.toLowerCase()]: 12.5 },
-        [secondTokenAddress]: { [currency.toLowerCase()]: 10 },
+        [tokenAddress]: {
+          [currency.toLowerCase()]: 12.5,
+          [`${currency.toLowerCase()}_24h_change`]: null,
+        },
+        [secondTokenAddress]: {
+          [currency.toLowerCase()]: 10,
+          [`${currency.toLowerCase()}_24h_change`]: 1.42069,
+        },
       };
       networkService.get.mockImplementation(({ url }) => {
         switch (url) {
@@ -174,6 +148,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '4610.25',
+              fiatBalance24hChange: '1.6942',
               fiatConversion: '1536.75',
             },
             {
@@ -189,6 +164,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '4000000000000000000',
               fiatBalance: '500',
+              fiatBalance24hChange: null,
               fiatConversion: '12.5',
             },
             {
@@ -204,6 +180,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '300',
+              fiatBalance24hChange: '1.42069',
               fiatConversion: '10',
             },
           ],
@@ -235,6 +212,7 @@ describe('Balances Controller (Unit)', () => {
             tokenAddress.toLowerCase(),
             secondTokenAddress.toLowerCase(),
           ].join(','),
+          include_24hr_change: true,
         },
       });
       expect(networkService.get.mock.calls[4][0].url).toBe(
@@ -245,6 +223,7 @@ describe('Balances Controller (Unit)', () => {
         params: {
           ids: chain.pricesProvider.nativeCoin,
           vs_currencies: currency.toLowerCase(),
+          include_24hr_change: true,
         },
       });
     });
@@ -264,7 +243,10 @@ describe('Balances Controller (Unit)', () => {
       const trusted = true;
       const currency = faker.finance.currencyCode();
       const tokenPriceProviderResponse = {
-        [tokenAddress]: { [currency.toLowerCase()]: 2.5 },
+        [tokenAddress]: {
+          [currency.toLowerCase()]: 2.5,
+          [`${currency.toLowerCase()}_24h_change`]: 1.6942,
+        },
       };
       networkService.get.mockImplementation(({ url }) => {
         switch (url) {
@@ -319,6 +301,7 @@ describe('Balances Controller (Unit)', () => {
       const nativeCoinPriceProviderResponse = {
         [chain.pricesProvider.nativeCoin!]: {
           [currency.toLowerCase()]: 1536.75,
+          [`${currency.toLowerCase()}_24h_change`]: 1.6942,
         },
       };
       networkService.get.mockImplementation(({ url }) => {
@@ -366,6 +349,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '4610.25',
+              fiatBalance24hChange: '1.6942',
               fiatConversion: '1536.75',
             },
           ],
@@ -429,6 +413,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '0',
+              fiatBalance24hChange: null,
               fiatConversion: '0',
             },
           ],
@@ -499,6 +484,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '0',
+              fiatBalance24hChange: null,
               fiatConversion: '0',
             },
             {
@@ -514,6 +500,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '3000000000000000000',
               fiatBalance: '0',
+              fiatBalance24hChange: null,
               fiatConversion: '0',
             },
           ],
@@ -533,7 +520,10 @@ describe('Balances Controller (Unit)', () => {
       ];
       const currency = faker.finance.currencyCode();
       const tokenPriceProviderResponse = {
-        [tokenAddress]: { [currency.toLowerCase()]: 2.5 },
+        [tokenAddress]: {
+          [currency.toLowerCase()]: 2.5,
+          [`${currency.toLowerCase()}_24h_change`]: 1.6942,
+        },
       };
       networkService.get.mockImplementation(({ url }) => {
         switch (url) {
@@ -580,6 +570,7 @@ describe('Balances Controller (Unit)', () => {
               },
               balance: '40000000000000000000000000000000000',
               fiatBalance: '1000000000000000000',
+              fiatBalance24hChange: '1.6942',
               fiatConversion: '2.5',
             },
           ],
@@ -687,6 +678,7 @@ describe('Balances Controller (Unit)', () => {
                 },
                 balance: '40000000000000000000000000000000000',
                 fiatBalance: '0',
+                fiatBalance24hChange: null,
                 fiatConversion: '0',
               },
             ],
@@ -754,6 +746,7 @@ describe('Balances Controller (Unit)', () => {
                 },
                 balance: '40000000000000000000000000000000000',
                 fiatBalance: '0',
+                fiatBalance24hChange: null,
                 fiatConversion: '0',
               },
             ],

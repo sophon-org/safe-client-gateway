@@ -22,6 +22,7 @@ describe('Configuration validator', () => {
     EMAIL_TEMPLATE_RECOVERY_TX: faker.string.alphanumeric(),
     EMAIL_TEMPLATE_UNKNOWN_RECOVERY_TX: faker.string.alphanumeric(),
     EMAIL_TEMPLATE_VERIFICATION_CODE: faker.string.alphanumeric(),
+    EXPIRATION_DEVIATE_PERCENT: faker.number.int({ min: 0, max: 100 }),
     FINGERPRINT_ENCRYPTION_KEY: faker.string.uuid(),
     INFURA_API_KEY: faker.string.uuid(),
     JWT_ISSUER: faker.string.uuid(),
@@ -30,7 +31,6 @@ describe('Configuration validator', () => {
     PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_CLIENT_EMAIL: faker.internet.email(),
     PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY:
       faker.string.alphanumeric(),
-    // PORTFOLIO_API_KEY: faker.string.uuid(),
     RELAY_PROVIDER_API_KEY_OPTIMISM: faker.string.uuid(),
     RELAY_PROVIDER_API_KEY_BSC: faker.string.uuid(),
     RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN: faker.string.uuid(),
@@ -44,6 +44,8 @@ describe('Configuration validator', () => {
     RELAY_PROVIDER_API_KEY_SEPOLIA: faker.string.uuid(),
     STAKING_API_KEY: faker.string.uuid(),
     STAKING_TESTNET_API_KEY: faker.string.uuid(),
+    CSV_AWS_ACCESS_KEY_ID: faker.string.uuid(),
+    CSV_AWS_SECRET_ACCESS_KEY: faker.string.uuid(),
   };
 
   it('should bypass this validation on test environment', () => {
@@ -77,7 +79,6 @@ describe('Configuration validator', () => {
     { key: 'PUSH_NOTIFICATIONS_API_PROJECT' },
     { key: 'PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_CLIENT_EMAIL' },
     { key: 'PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY' },
-    // { key: 'PORTFOLIO_API_KEY' },
     { key: 'RELAY_PROVIDER_API_KEY_OPTIMISM' },
     { key: 'RELAY_PROVIDER_API_KEY_BSC' },
     { key: 'RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN' },
@@ -120,6 +121,7 @@ describe('Configuration validator', () => {
       EMAIL_TEMPLATE_RECOVERY_TX: faker.string.alphanumeric(),
       EMAIL_TEMPLATE_UNKNOWN_RECOVERY_TX: faker.string.alphanumeric(),
       EMAIL_TEMPLATE_VERIFICATION_CODE: faker.string.alphanumeric(),
+      EXPIRATION_DEVIATE_PERCENT: faker.number.int({ min: 0, max: 100 }),
       FINGERPRINT_ENCRYPTION_KEY: faker.string.uuid(),
       INFURA_API_KEY: faker.string.uuid(),
       JWT_ISSUER: faker.string.uuid(),
@@ -129,7 +131,6 @@ describe('Configuration validator', () => {
         faker.internet.email(),
       PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY:
         faker.string.alphanumeric(),
-      // PORTFOLIO_API_KEY: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_OPTIMISM: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_BSC: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN: faker.string.uuid(),
@@ -151,6 +152,27 @@ describe('Configuration validator', () => {
     );
   });
 
+  it.each([
+    { key: 'TARGETED_MESSAGING_FILE_STORAGE_TYPE' },
+    { key: 'CSV_EXPORT_FILE_STORAGE_TYPE' },
+  ])(
+    `should detect an invalid $key configuration in production environment`,
+    ({ key }) => {
+      process.env.NODE_ENV = 'production';
+      const config = {
+        ...omit(validConfiguration, key),
+        [`${key}`]: faker.lorem.words(),
+      };
+      expect(() =>
+        configurationValidator(config, RootConfigurationSchema),
+      ).toThrow(
+        new RegExp(
+          `${key} Invalid enum value. Expected 'local' | 'aws', received`,
+        ),
+      );
+    },
+  );
+
   it('should detect an invalid TARGETED_MESSAGING_FILE_STORAGE_TYPE configuration in production environment', () => {
     process.env.NODE_ENV = 'production';
     const invalidConfiguration: Record<string, unknown> = {
@@ -171,6 +193,7 @@ describe('Configuration validator', () => {
       EMAIL_TEMPLATE_RECOVERY_TX: faker.string.alphanumeric(),
       EMAIL_TEMPLATE_UNKNOWN_RECOVERY_TX: faker.string.alphanumeric(),
       EMAIL_TEMPLATE_VERIFICATION_CODE: faker.string.alphanumeric(),
+      EXPIRATION_DEVIATE_PERCENT: faker.number.int({ min: 0, max: 100 }),
       FINGERPRINT_ENCRYPTION_KEY: faker.string.uuid(),
       INFURA_API_KEY: faker.string.uuid(),
       JWT_ISSUER: faker.string.uuid(),
@@ -180,7 +203,6 @@ describe('Configuration validator', () => {
         faker.internet.email(),
       PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY:
         faker.string.alphanumeric(),
-      // PORTFOLIO_API_KEY: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_OPTIMISM: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_BSC: faker.string.uuid(),
       RELAY_PROVIDER_API_KEY_GNOSIS_CHAIN: faker.string.uuid(),
@@ -209,6 +231,8 @@ describe('Configuration validator', () => {
       { key: 'AWS_KMS_ENCRYPTION_KEY_ID' },
       { key: 'AWS_SECRET_ACCESS_KEY' },
       { key: 'AWS_REGION' },
+      { key: 'CSV_AWS_ACCESS_KEY_ID' },
+      { key: 'CSV_AWS_SECRET_ACCESS_KEY' },
     ])(`should require $key configuration in ${env} environment`, ({ key }) => {
       process.env.NODE_ENV = 'production';
       const config = { ...omit(validConfiguration, key), CGW_ENV: env };

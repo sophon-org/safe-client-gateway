@@ -1,9 +1,19 @@
-export function getNumberString(value: number): string {
+import { createHash } from 'crypto';
+import type { BinaryLike } from 'crypto';
+
+// We use the maximum value in order to preserve all decimals
+// @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat#maximumfractiondigits
+const MAX_MAXIMUM_FRACTION_DIGITS = 100;
+
+const formatter = new Intl.NumberFormat('en-US', {
   // Prevent scientific notation
-  return value.toLocaleString('en-US', {
-    notation: 'standard',
-    useGrouping: false,
-  });
+  notation: 'standard',
+  useGrouping: false,
+  maximumFractionDigits: MAX_MAXIMUM_FRACTION_DIGITS,
+});
+
+export function getNumberString(value: number): string {
+  return formatter.format(value);
 }
 
 /**
@@ -17,4 +27,8 @@ export function truncateAddress(
   length: number = 4,
 ): `0x${string}` {
   return `${address.slice(0, length + 2)}...${address.slice(-length)}` as `0x${string}`;
+}
+
+export function hashSha1(value: BinaryLike): string {
+  return createHash('sha1').update(value).digest('hex');
 }

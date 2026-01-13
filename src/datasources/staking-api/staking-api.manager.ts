@@ -35,11 +35,13 @@ export class StakingApiManager implements IStakingApiManager {
       .getChain(chainId)
       .then(ChainSchema.parse);
 
+    const env = chain.isTestnet ? 'testnet' : 'mainnet';
+
     const baseUrl = this.configurationService.getOrThrow<string>(
-      chain.isTestnet ? 'staking.testnet.baseUri' : 'staking.mainnet.baseUri',
+      `staking.${env}.baseUri`,
     );
     const apiKey = this.configurationService.getOrThrow<string>(
-      chain.isTestnet ? 'staking.testnet.apiKey' : 'staking.mainnet.apiKey',
+      `staking.${env}.apiKey`,
     );
 
     this.apis[chainId] = new KilnApi(
@@ -50,6 +52,7 @@ export class StakingApiManager implements IStakingApiManager {
       this.configurationService,
       this.cacheService,
       chain.chainId,
+      'staking',
     );
 
     return Promise.resolve(this.apis[chainId]);

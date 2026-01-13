@@ -22,7 +22,6 @@ import { tokenBuilder } from '@/domain/tokens/__tests__/token.builder';
 import { messageBuilder } from '@/domain/messages/entities/__tests__/message.builder';
 import { proposeTransactionDtoBuilder } from '@/routes/transactions/entities/__tests__/propose-transaction.dto.builder';
 import { erc20TransferBuilder } from '@/domain/safe/entities/__tests__/erc20-transfer.builder';
-import { DeviceType } from '@/domain/notifications/v1/entities/device.entity';
 import { getAddress } from 'viem';
 import type { ILoggingService } from '@/logging/logging.interface';
 import { indexingStatusBuilder } from '@/domain/chains/entities/__tests__/indexing-status.builder';
@@ -93,6 +92,10 @@ describe('TransactionApi', () => {
       }
       if (key === 'owners.ownersTtlSeconds') {
         return ownersTtlSeconds;
+      }
+      // TODO: Remove after Vault decoding has been released
+      if (key === 'application.isProduction') {
+        return true;
       }
       throw Error(`Unexpected key: ${key}`);
     });
@@ -520,6 +523,110 @@ describe('TransactionApi', () => {
       expect(mockCacheService.deleteByKey).toHaveBeenCalledWith(
         `${chainId}_safe_exists_${safeAddress}`,
       );
+    });
+  });
+
+  describe('getTrustedForDelegateCallContracts', () => {
+    it('should return the trusted for delegate call contracts received', async () => {
+      const contractPage = pageBuilder()
+        .with('results', [
+          contractBuilder().with('trustedForDelegateCall', true).build(),
+          contractBuilder().with('trustedForDelegateCall', true).build(),
+        ])
+        .build();
+      const getTrustedForDelegateCallContractsUrl = `${baseUrl}/api/v1/contracts/`;
+      const cacheDir = new CacheDir(`${chainId}_trusted_contracts`, '');
+      mockDataSource.get.mockResolvedValueOnce(rawify(contractPage));
+
+      const actual = await service.getTrustedForDelegateCallContracts({});
+
+      expect(actual).toBe(contractPage);
+      expect(mockDataSource.get).toHaveBeenCalledTimes(1);
+      expect(mockDataSource.get).toHaveBeenCalledWith({
+        cacheDir,
+        url: getTrustedForDelegateCallContractsUrl,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+        expireTimeSeconds: defaultExpirationTimeInSeconds,
+        networkRequest: {
+          params: {
+            trusted_for_delegate_call: true,
+          },
+        },
+      });
+    });
+
+    it('should relay pagination', async () => {
+      const contractPage = pageBuilder()
+        .with('results', [
+          contractBuilder().with('trustedForDelegateCall', true).build(),
+          contractBuilder().with('trustedForDelegateCall', true).build(),
+        ])
+        .build();
+      const getTrustedForDelegateCallContractsUrl = `${baseUrl}/api/v1/contracts/`;
+      const cacheDir = new CacheDir(`${chainId}_trusted_contracts`, '');
+      mockDataSource.get.mockResolvedValueOnce(rawify(contractPage));
+      const limit = faker.number.int();
+      const offset = faker.number.int();
+
+      const actual = await service.getTrustedForDelegateCallContracts({
+        limit,
+        offset,
+      });
+
+      expect(actual).toBe(contractPage);
+      expect(mockDataSource.get).toHaveBeenCalledTimes(1);
+      expect(mockDataSource.get).toHaveBeenCalledWith({
+        cacheDir,
+        url: getTrustedForDelegateCallContractsUrl,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+        expireTimeSeconds: defaultExpirationTimeInSeconds,
+        networkRequest: {
+          params: {
+            trusted_for_delegate_call: true,
+            limit,
+            offset,
+          },
+        },
+      });
+    });
+
+    const errorMessage = faker.word.words();
+    it.each([
+      ['Transaction Service', { nonFieldErrors: [errorMessage] }],
+      ['standard', new Error(errorMessage)],
+    ])(`should forward a %s error`, async (_, error) => {
+      const getTrustedForDelegateCallContractsUrl = `${baseUrl}/api/v1/contracts/`;
+      const statusCode = faker.internet.httpStatusCode({
+        types: ['clientError', 'serverError'],
+      });
+      const expected = new DataSourceError(errorMessage, statusCode);
+      const cacheDir = new CacheDir(`${chainId}_trusted_contracts`, '');
+      mockDataSource.get.mockRejectedValueOnce(
+        new NetworkResponseError(
+          new URL(getTrustedForDelegateCallContractsUrl),
+          {
+            status: statusCode,
+          } as Response,
+          error,
+        ),
+      );
+
+      await expect(
+        service.getTrustedForDelegateCallContracts({}),
+      ).rejects.toThrow(expected);
+
+      expect(mockDataSource.get).toHaveBeenCalledTimes(1);
+      expect(mockDataSource.get).toHaveBeenCalledWith({
+        cacheDir,
+        url: getTrustedForDelegateCallContractsUrl,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+        expireTimeSeconds: defaultExpirationTimeInSeconds,
+        networkRequest: {
+          params: {
+            trusted_for_delegate_call: true,
+          },
+        },
+      });
     });
   });
 
@@ -1192,7 +1299,9 @@ describe('TransactionApi', () => {
   describe('postConfirmation', () => {
     it('should post confirmation', async () => {
       const safeTxHash = faker.string.hexadecimal();
-      const signedSafeTxHash = faker.string.hexadecimal();
+      const signature = faker.string.hexadecimal({
+        length: 130,
+      }) as `0x${string}`;
       const postConfirmationUrl = `${baseUrl}/api/v1/multisig-transactions/${safeTxHash}/confirmations/`;
       networkService.post.mockResolvedValueOnce({
         status: 200,
@@ -1201,14 +1310,14 @@ describe('TransactionApi', () => {
 
       await service.postConfirmation({
         safeTxHash,
-        addConfirmationDto: { signedSafeTxHash },
+        addConfirmationDto: { signature },
       });
 
       expect(networkService.post).toHaveBeenCalledTimes(1);
       expect(networkService.post).toHaveBeenCalledWith({
         url: postConfirmationUrl,
         data: {
-          signature: signedSafeTxHash,
+          signature,
         },
       });
     });
@@ -1219,7 +1328,9 @@ describe('TransactionApi', () => {
       ['standard', new Error(errorMessage)],
     ])(`should forward a %s error`, async (_, error) => {
       const safeTxHash = faker.string.hexadecimal();
-      const signedSafeTxHash = faker.string.hexadecimal();
+      const signature = faker.string.hexadecimal({
+        length: 130,
+      }) as `0x${string}`;
       const postConfirmationUrl = `${baseUrl}/api/v1/multisig-transactions/${safeTxHash}/confirmations/`;
       const statusCode = faker.internet.httpStatusCode({
         types: ['clientError', 'serverError'],
@@ -1238,7 +1349,7 @@ describe('TransactionApi', () => {
       await expect(
         service.postConfirmation({
           safeTxHash,
-          addConfirmationDto: { signedSafeTxHash },
+          addConfirmationDto: { signature },
         }),
       ).rejects.toThrow(expected);
 
@@ -1246,7 +1357,7 @@ describe('TransactionApi', () => {
       expect(networkService.post).toHaveBeenCalledWith({
         url: postConfirmationUrl,
         data: {
-          signature: signedSafeTxHash,
+          signature,
         },
       });
     });
@@ -2143,187 +2254,6 @@ describe('TransactionApi', () => {
     });
   });
 
-  describe('postDeviceRegistration', () => {
-    it('should post device registration', async () => {
-      const device = {
-        uuid: faker.string.uuid(),
-        cloudMessagingToken: faker.string.uuid(),
-        buildNumber: faker.system.semver(),
-        deviceType: faker.helpers.enumValue(DeviceType),
-        version: faker.system.semver(),
-        timestamp: faker.date.recent().toISOString(),
-        bundle: faker.word.noun(),
-      };
-      const safes = [
-        faker.finance.ethereumAddress(),
-        faker.finance.ethereumAddress(),
-      ];
-      const signatures = [
-        faker.string.hexadecimal(),
-        faker.string.hexadecimal(),
-      ];
-      const postDeviceRegistrationUrl = `${baseUrl}/api/v1/notifications/devices/`;
-      networkService.post.mockResolvedValueOnce({
-        status: 200,
-        data: rawify({}),
-      });
-
-      await service.postDeviceRegistration({
-        device,
-        safes,
-        signatures,
-      });
-
-      expect(networkService.post).toHaveBeenCalledTimes(1);
-      expect(networkService.post).toHaveBeenCalledWith({
-        url: postDeviceRegistrationUrl,
-        data: {
-          ...device,
-          safes,
-          signatures,
-        },
-      });
-    });
-
-    const errorMessage = faker.word.words();
-    it.each([
-      ['Transaction Service', { nonFieldErrors: [errorMessage] }],
-      ['standard', new Error(errorMessage)],
-    ])(`should forward a %s error`, async (_, error) => {
-      const safeTxHash = faker.string.hexadecimal();
-      const signedSafeTxHash = faker.string.hexadecimal();
-      const postConfirmationUrl = `${baseUrl}/api/v1/multisig-transactions/${safeTxHash}/confirmations/`;
-      const statusCode = faker.internet.httpStatusCode({
-        types: ['clientError', 'serverError'],
-      });
-      const expected = new DataSourceError(errorMessage, statusCode);
-      networkService.post.mockRejectedValueOnce(
-        new NetworkResponseError(
-          new URL(postConfirmationUrl),
-          {
-            status: statusCode,
-          } as Response,
-          error,
-        ),
-      );
-
-      await expect(
-        service.postConfirmation({
-          safeTxHash,
-          addConfirmationDto: { signedSafeTxHash },
-        }),
-      ).rejects.toThrow(expected);
-
-      expect(networkService.post).toHaveBeenCalledTimes(1);
-      expect(networkService.post).toHaveBeenCalledWith({
-        url: postConfirmationUrl,
-        data: {
-          signature: signedSafeTxHash,
-        },
-      });
-    });
-  });
-
-  describe('deleteDeviceRegistration', () => {
-    it('should delete device registration', async () => {
-      const uuid = faker.string.uuid();
-      const deleteDeviceRegistrationUrl = `${baseUrl}/api/v1/notifications/devices/${uuid}`;
-      networkService.delete.mockResolvedValueOnce({
-        status: 200,
-        data: rawify({}),
-      });
-
-      await service.deleteDeviceRegistration(uuid);
-
-      expect(networkService.delete).toHaveBeenCalledTimes(1);
-      expect(networkService.delete).toHaveBeenCalledWith({
-        url: deleteDeviceRegistrationUrl,
-      });
-    });
-
-    const errorMessage = faker.word.words();
-    it.each([
-      ['Transaction Service', { nonFieldErrors: [errorMessage] }],
-      ['standard', new Error(errorMessage)],
-    ])(`should forward a %s error`, async (_, error) => {
-      const uuid = faker.string.uuid();
-      const deleteDeviceRegistrationUrl = `${baseUrl}/api/v1/notifications/devices/${uuid}`;
-      const statusCode = faker.internet.httpStatusCode({
-        types: ['clientError', 'serverError'],
-      });
-      const expected = new DataSourceError(errorMessage, statusCode);
-      networkService.delete.mockRejectedValueOnce(
-        new NetworkResponseError(
-          new URL(deleteDeviceRegistrationUrl),
-          {
-            status: statusCode,
-          } as Response,
-          error,
-        ),
-      );
-
-      await expect(service.deleteDeviceRegistration(uuid)).rejects.toThrow(
-        expected,
-      );
-
-      expect(networkService.delete).toHaveBeenCalledTimes(1);
-      expect(networkService.delete).toHaveBeenCalledWith({
-        url: deleteDeviceRegistrationUrl,
-      });
-    });
-  });
-
-  describe('deleteSafeRegistration', () => {
-    it('should delete Safe registration', async () => {
-      const uuid = faker.string.uuid();
-      const safeAddress = getAddress(faker.finance.ethereumAddress());
-      const deleteSafeRegistrationUrl = `${baseUrl}/api/v1/notifications/devices/${uuid}/safes/${safeAddress}`;
-      networkService.delete.mockResolvedValueOnce({
-        status: 200,
-        data: rawify({}),
-      });
-
-      await service.deleteSafeRegistration({ uuid, safeAddress });
-
-      expect(networkService.delete).toHaveBeenCalledTimes(1);
-      expect(networkService.delete).toHaveBeenCalledWith({
-        url: deleteSafeRegistrationUrl,
-      });
-    });
-
-    const errorMessage = faker.word.words();
-    it.each([
-      ['Transaction Service', { nonFieldErrors: [errorMessage] }],
-      ['standard', new Error(errorMessage)],
-    ])(`should forward a %s error`, async (_, error) => {
-      const uuid = faker.string.uuid();
-      const safeAddress = getAddress(faker.finance.ethereumAddress());
-      const deleteSafeRegistrationUrl = `${baseUrl}/api/v1/notifications/devices/${uuid}/safes/${safeAddress}`;
-      const statusCode = faker.internet.httpStatusCode({
-        types: ['clientError', 'serverError'],
-      });
-      const expected = new DataSourceError(errorMessage, statusCode);
-      networkService.delete.mockRejectedValueOnce(
-        new NetworkResponseError(
-          new URL(deleteSafeRegistrationUrl),
-          {
-            status: statusCode,
-          } as Response,
-          error,
-        ),
-      );
-
-      await expect(
-        service.deleteSafeRegistration({ uuid, safeAddress }),
-      ).rejects.toThrow(expected);
-
-      expect(networkService.delete).toHaveBeenCalledTimes(1);
-      expect(networkService.delete).toHaveBeenCalledWith({
-        url: deleteSafeRegistrationUrl,
-      });
-    });
-  });
-
   describe('getEstimation', () => {
     it('should return the estimation received', async () => {
       const safeAddress = getAddress(faker.finance.ethereumAddress());
@@ -2782,14 +2712,14 @@ describe('TransactionApi', () => {
     });
   });
 
-  // TODO: Remove temporary cache times test for Holesky chain.
-  describe('temp - Holesky expiration times', () => {
-    it('should use the Holesky expiration time for the datasource', async () => {
-      const holeskyExpirationTime = faker.number.int();
-      const holeskyChainId = '17000';
+  // TODO: Remove temporary cache times test for Hoodi chain.
+  describe('temp - Hoodi expiration times', () => {
+    it('should use the Hoodi expiration time for the datasource', async () => {
+      const hoodiExpirationTime = faker.number.int();
+      const hoodiChainId = '560048';
       mockConfigurationService.getOrThrow.mockImplementation((key) => {
-        if (key === 'expirationTimeInSeconds.holesky') {
-          return holeskyExpirationTime;
+        if (key === 'expirationTimeInSeconds.hoodi') {
+          return hoodiExpirationTime;
         }
         if (key === 'expirationTimeInSeconds.indexing') {
           return indexingExpirationTimeInSeconds;
@@ -2809,11 +2739,15 @@ describe('TransactionApi', () => {
         if (key === 'owners.ownersTtlSeconds') {
           return ownersTtlSeconds;
         }
+        // TODO: Remove after Vault decoding has been released
+        if (key === 'application.isProduction') {
+          return true;
+        }
         throw Error(`Unexpected key: ${key}`);
       });
 
       service = new TransactionApi(
-        holeskyChainId, // Holesky chainId
+        hoodiChainId, // Hoodi chainId
         baseUrl,
         mockDataSource,
         mockCacheService,
@@ -2829,7 +2763,7 @@ describe('TransactionApi', () => {
       const offset = faker.number.int();
       const getTokensUrl = `${baseUrl}/api/v1/tokens/`;
       const cacheDir = new CacheDir(
-        `${holeskyChainId}_tokens`,
+        `${hoodiChainId}_tokens`,
         `${limit}_${offset}`,
       );
       mockDataSource.get.mockResolvedValueOnce(rawify(tokensPage));
@@ -2843,8 +2777,8 @@ describe('TransactionApi', () => {
       expect(mockDataSource.get).toHaveBeenCalledTimes(1);
       expect(mockDataSource.get).toHaveBeenCalledWith({
         cacheDir,
-        expireTimeSeconds: holeskyExpirationTime,
-        notFoundExpireTimeSeconds: holeskyExpirationTime,
+        expireTimeSeconds: hoodiExpirationTime,
+        notFoundExpireTimeSeconds: hoodiExpirationTime,
         url: getTokensUrl,
         networkRequest: {
           params: {

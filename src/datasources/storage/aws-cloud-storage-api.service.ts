@@ -1,7 +1,21 @@
-import { IConfigurationService } from '@/config/configuration.service.interface';
 import type { ICloudStorageApiService } from '@/datasources/storage/cloud-storage-api.service';
+import {
+  AWS_BUCKET_NAME,
+  AWS_BASE_PATH,
+  AWS_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY,
+} from '@/datasources/storage/constants';
+import { LogType } from '@/domain/common/entities/log-type.entity';
+import { ILoggingService, LoggingService } from '@/logging/logging.interface';
 import { asError } from '@/logging/utils';
-import { S3 } from '@aws-sdk/client-s3';
+import {
+  CompleteMultipartUploadCommandOutput,
+  GetObjectCommand,
+  PutObjectCommandInput,
+  S3,
+} from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Inject, Injectable } from '@nestjs/common';
 import path from 'path';
 import { Readable } from 'stream';
@@ -9,22 +23,17 @@ import { Readable } from 'stream';
 @Injectable()
 export class AwsCloudStorageApiService implements ICloudStorageApiService {
   private readonly s3Client: S3;
-  private readonly bucket: string;
-  private readonly basePath: string;
 
   constructor(
-    @Inject(IConfigurationService)
-    private readonly configurationService: IConfigurationService,
+    @Inject(AWS_ACCESS_KEY_ID) private readonly accessKeyId: string,
+    @Inject(AWS_SECRET_ACCESS_KEY) private readonly secretAccessKey: string,
+    @Inject(AWS_BUCKET_NAME) private readonly bucket: string,
+    @Inject(AWS_BASE_PATH) private readonly basePath: string,
+    @Inject(LoggingService)
+    private readonly loggingService: ILoggingService,
   ) {
-    this.s3Client = new S3();
-    this.basePath = this.configurationService.getOrThrow<string>(
-      'targetedMessaging.fileStorage.aws.basePath',
-    );
-    this.bucket = this.configurationService.getOrThrow<string>(
-      'targetedMessaging.fileStorage.aws.bucketName',
-    );
+    this.s3Client = new S3({ credentials: { accessKeyId, secretAccessKey } });
   }
-
   async getFileContent(sourceFile: string): Promise<string> {
     try {
       const response = await this.s3Client.getObject({
@@ -39,6 +48,51 @@ export class AwsCloudStorageApiService implements ICloudStorageApiService {
     } catch (err) {
       throw new Error(
         `Error getting file content from S3: ${asError(err).message}`,
+      );
+    }
+  }
+
+  createUploadStream(
+    fileName: string,
+    body: Readable,
+    options: Partial<PutObjectCommandInput> = {},
+  ): Promise<CompleteMultipartUploadCommandOutput> {
+    const upload = new Upload({
+      client: this.s3Client,
+      params: {
+        Bucket: this.bucket,
+        Key: path.posix.join(this.basePath, fileName),
+        Body: body,
+        ...options,
+      },
+    });
+
+    // Debugging: progress
+    upload.on('httpUploadProgress', (p) => {
+      this.loggingService.debug({
+        type: LogType.AwsCloudStorageUpload,
+        total: p.total,
+        loaded: p.loaded,
+        part: p.part,
+      });
+    });
+
+    // Return the promise immediately - don't await here!
+    // The upload will start when data flows through the stream
+    // Await the promise when data was fully uploaded
+    return upload.done();
+  }
+
+  async getSignedUrl(fileName: string, expiresIn: number): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: path.posix.join(this.basePath, fileName),
+    });
+    try {
+      return await getSignedUrl(this.s3Client, command, { expiresIn });
+    } catch (err) {
+      throw new Error(
+        `Error generating signed URL for S3: ${asError(err).message}`,
       );
     }
   }

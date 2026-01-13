@@ -1,16 +1,21 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum TransactionInfoType {
+  Bridge = 'Bridge',
   Creation = 'Creation',
   Custom = 'Custom',
-  SettingsChange = 'SettingsChange',
-  Transfer = 'Transfer',
-  SwapOrder = 'SwapOrder',
-  SwapTransfer = 'SwapTransfer',
-  TwapOrder = 'TwapOrder',
   NativeStakingDeposit = 'NativeStakingDeposit',
   NativeStakingValidatorsExit = 'NativeStakingValidatorsExit',
   NativeStakingWithdraw = 'NativeStakingWithdraw',
+  SettingsChange = 'SettingsChange',
+  Swap = 'Swap',
+  SwapAndBridge = 'SwapAndBridge',
+  SwapOrder = 'SwapOrder',
+  SwapTransfer = 'SwapTransfer',
+  Transfer = 'Transfer',
+  TwapOrder = 'TwapOrder',
+  VaultDeposit = 'VaultDeposit',
+  VaultRedeem = 'VaultRedeem',
 }
 
 export class TransactionInfo {

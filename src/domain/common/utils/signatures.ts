@@ -1,90 +1,103 @@
-import { SignatureType } from '@/domain/common/entities/signature-type.entity';
+import { HEX_BYTES_LENGTH, HEX_PREFIX_LENGTH } from '@/routes/common/constants';
+import { isHexBytes } from '@/validation/entities/schemas/hexbytes.schema';
+import { isSignatureLike } from '@/validation/entities/schemas/signature.schema';
 
-const R_LENGTH = 64;
-const S_LENGTH = 64;
-const V_LENGTH = 2;
-const SIGNATURE_LENGTH = R_LENGTH + S_LENGTH + V_LENGTH;
+export const R_OR_S_HEX_LENGTH = 32 * HEX_BYTES_LENGTH; // 32 bytes in hex
+export const V_HEX_LENGTH = 1 * HEX_BYTES_LENGTH; // 1 byte in hex
+export const SIGNATURE_HEX_LENGTH =
+  R_OR_S_HEX_LENGTH + R_OR_S_HEX_LENGTH + V_HEX_LENGTH; // 65 bytes in hex
+export const DYNAMIC_PART_LENGTH_FIELD_HEX_LENGTH = 32 * HEX_BYTES_LENGTH; // 32 bytes in hex
 
-const ETH_SIGN_V_ADJUSTMENT = 4;
-
-export type Signature = {
-  r: `0x${string}`;
-  s: `0x${string}`;
-  v: number;
-};
-
-export function splitSignature(signature: string): Signature {
-  if (signature.startsWith('0x')) {
-    signature = signature.slice(2);
-  }
-
-  if (signature.length !== SIGNATURE_LENGTH) {
-    throw new Error('Invalid signature length');
-  }
-
-  return {
-    r: `0x${signature.slice(0, R_LENGTH)}`,
-    s: `0x${signature.slice(R_LENGTH, R_LENGTH + S_LENGTH)}`,
-    v: parseInt(signature.slice(-1 * V_LENGTH), 16),
-  };
-}
-
-export function splitConcatenatedSignatures(
-  string: string,
+/**
+ * Parses a (concatenated) signature string into individual signature types
+ *
+ * @param signature - A 0x-prefixed hex string of a (concatenated) signature
+ * @returns An array of 0x-prefixed signature type signatures
+ */
+export function parseSignaturesByType(
+  signature: `0x${string}`,
 ): Array<`0x${string}`> {
-  if (string.startsWith('0x')) {
-    string = string.slice(2);
+  // TODO: Replace with viem's isHex and update all tests accordingly
+  if (!signature.startsWith('0x')) {
+    throw new Error('Invalid "0x" notated signature');
   }
 
-  if (string.length % SIGNATURE_LENGTH !== 0) {
-    throw new Error('Invalid signatures length');
+  if (!isHexBytes(signature)) {
+    throw new Error('Invalid hex bytes length');
+  }
+
+  if (!isSignatureLike(signature)) {
+    throw new Error('Invalid signature length');
   }
 
   const signatures: Array<`0x${string}`> = [];
 
-  for (let i = 0; i < string.length; i += SIGNATURE_LENGTH) {
-    signatures.push(`0x${string.slice(i, i + SIGNATURE_LENGTH)}`);
+  let i = HEX_PREFIX_LENGTH;
+
+  while (i < signature.length) {
+    if (signature.length - i < SIGNATURE_HEX_LENGTH) {
+      throw new Error('Insufficient length for static part');
+    }
+
+    const staticPart = getStaticPart(signature, i);
+
+    if (!isContractSignature(staticPart)) {
+      signatures.push(`0x${staticPart}`);
+
+      // Move to next signature
+      i += SIGNATURE_HEX_LENGTH;
+      continue;
+    }
+
+    const dynamicPart = getDynamicPart(signature, i);
+
+    signatures.push(`0x${staticPart}${dynamicPart}`);
+
+    // Move to next signature, skipping dynamic part
+    i += SIGNATURE_HEX_LENGTH + dynamicPart.length;
   }
 
   return signatures;
 }
 
-export function adjustEthSignSignature(
-  signature: `0x${string}`,
-): `0x${string}` {
-  const { r, s, v } = splitSignature(signature);
+function getStaticPart(signature: `0x${string}`, offset: number): string {
+  return signature.slice(offset, offset + SIGNATURE_HEX_LENGTH);
+}
 
-  if (!isEoaV(v)) {
-    throw new Error(`Invalid ${SignatureType.Eoa} signature`);
+function isContractSignature(staticPart: string): boolean {
+  const v = staticPart.slice(V_HEX_LENGTH * -1);
+  return v === '00';
+}
+
+function getDynamicPart(maybeDynamicPart: string, offset: number): string {
+  if (!hasLengthField(maybeDynamicPart, offset)) {
+    throw new Error('Insufficient length for dynamic part length field');
   }
 
-  return `0x${r.slice(2)}${s.slice(2)}${(v + ETH_SIGN_V_ADJUSTMENT).toString(16)}`;
-}
+  const remainingHex = maybeDynamicPart.slice(offset + SIGNATURE_HEX_LENGTH);
+  const dynamicPartHexLength = getDynamicPartLength(remainingHex);
+  const dynamicPart = remainingHex.slice(0, dynamicPartHexLength);
 
-export function normalizeEthSignSignature(
-  signature: `0x${string}`,
-): `0x${string}` {
-  const { r, s, v } = splitSignature(signature);
-
-  if (!isEthSignV(v)) {
-    throw new Error(`Invalid ${SignatureType.EthSign} signature`);
+  // Verify entire dynamic part is present
+  if (dynamicPart.length !== dynamicPartHexLength) {
+    throw new Error('Insufficient length for dynamic part');
   }
 
-  return `0x${r.slice(2)}${s.slice(2)}${(v - ETH_SIGN_V_ADJUSTMENT).toString(16)}`;
+  return dynamicPart;
 }
 
-export function isApprovedHashV(v: Signature['v']): boolean {
-  return v === 1;
+function hasLengthField(maybeDynamicPart: string, offset: number): boolean {
+  return (
+    maybeDynamicPart.length - offset >=
+    SIGNATURE_HEX_LENGTH + DYNAMIC_PART_LENGTH_FIELD_HEX_LENGTH
+  );
 }
 
-export function isContractSignatureV(v: Signature['v']): boolean {
-  return v === 0;
-}
-
-export function isEoaV(v: Signature['v']): boolean {
-  return v === 27 || v === 28;
-}
-
-export function isEthSignV(v: Signature['v']): boolean {
-  return v === 31 || v === 32;
+function getDynamicPartLength(remainingHex: string): number {
+  const lengthFieldHex = remainingHex.slice(
+    0,
+    DYNAMIC_PART_LENGTH_FIELD_HEX_LENGTH,
+  );
+  const byteLength = parseInt(lengthFieldHex, 16);
+  return DYNAMIC_PART_LENGTH_FIELD_HEX_LENGTH + byteLength * HEX_BYTES_LENGTH;
 }

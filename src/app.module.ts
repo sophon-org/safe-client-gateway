@@ -7,10 +7,12 @@ import {
 } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { CacheModule as InMemoryCacheModule } from '@nestjs/cache-manager';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';
 import { join } from 'path';
 import { ChainsModule } from '@/routes/chains/chains.module';
 import { BalancesModule } from '@/routes/balances/balances.module';
+import { PositionsModule } from '@/routes/positions/positions.module';
 import { NetworkModule } from '@/datasources/network/network.module';
 import { ConfigurationModule } from '@/config/configuration.module';
 import { CacheModule } from '@/datasources/cache/cache.module';
@@ -19,10 +21,7 @@ import { CommunityModule } from '@/routes/community/community.module';
 import { ContractsModule } from '@/routes/contracts/contracts.module';
 import { DataDecodedModule } from '@/routes/data-decode/data-decoded.module';
 import { DelegatesModule } from '@/routes/delegates/delegates.module';
-import {
-  HooksModule,
-  HooksModuleWithNotifications,
-} from '@/routes/hooks/hooks.module';
+import { HooksModule } from '@/routes/hooks/hooks.module';
 import { SafeAppsModule } from '@/routes/safe-apps/safe-apps.module';
 import { HealthModule } from '@/routes/health/health.module';
 import { OwnersModule } from '@/routes/owners/owners.module';
@@ -59,8 +58,10 @@ import {
   type ILoggingService,
 } from '@/logging/logging.interface';
 import { UsersModule } from '@/routes/users/users.module';
-import { OrganizationsModule } from '@/routes/organizations/organizations.module';
-import { UserOrganizationsModule } from '@/routes/organizations/user-organizations.module';
+import { SpacesModule } from '@/routes/spaces/spaces.module';
+import { MembersModule } from '@/routes/spaces/members.module';
+import { BullModule } from '@nestjs/bullmq';
+import { CsvExportModule } from '@/modules/csv-export/v1/csv-export.module';
 
 @Module({})
 export class AppModule implements NestModule {
@@ -71,7 +72,7 @@ export class AppModule implements NestModule {
       users: isUsersFeatureEnabled,
       email: isEmailFeatureEnabled,
       delegatesV2: isDelegatesV2Enabled,
-      pushNotifications: isPushNotificationsEnabled,
+      zerionPositions: isZerionPositionsFeatureEnabled,
     } = configFactory()['features'];
 
     return {
@@ -83,10 +84,12 @@ export class AppModule implements NestModule {
         ...(isAccountsFeatureEnabled ? [AccountsModule] : []),
         ...(isAuthFeatureEnabled ? [AuthModule] : []),
         BalancesModule,
+        ...(isZerionPositionsFeatureEnabled ? [PositionsModule] : []),
         ChainsModule,
         CollectiblesModule,
         CommunityModule,
         ContractsModule,
+        CsvExportModule,
         DataDecodedModule,
         // TODO: delete/rename DelegatesModule when clients migration to v2 is completed.
         DelegatesModule,
@@ -97,13 +100,12 @@ export class AppModule implements NestModule {
           : []),
         EstimationsModule,
         HealthModule,
-        ...(isPushNotificationsEnabled
-          ? [HooksModuleWithNotifications, NotificationsModuleV2]
-          : [HooksModule]),
+        HooksModule,
+        NotificationsModuleV2,
         MessagesModule,
         NotificationsModule,
         ...(isUsersFeatureEnabled
-          ? [UsersModule, OrganizationsModule, UserOrganizationsModule]
+          ? [UsersModule, SpacesModule, MembersModule]
           : []),
         OwnersModule,
         RelayControllerModule,
@@ -123,6 +125,7 @@ export class AppModule implements NestModule {
           },
         }),
         ConfigurationModule.register(configFactory),
+        InMemoryCacheModule.register({ isGlobal: true }),
         NetworkModule,
         RequestScopedLoggingModule,
         ScheduleModule.forRoot(),
@@ -140,8 +143,12 @@ export class AppModule implements NestModule {
             loggingService: ILoggingService,
           ) => {
             const typeormConfig = configService.getOrThrow('db.orm');
+            const cache = configService.get('db.orm.cache');
             const postgresConfigObject = postgresConfig(
-              configService.getOrThrow('db.connection.postgres'),
+              {
+                ...configService.getOrThrow('db.connection.postgres'),
+                cache,
+              },
               loggingService,
             );
 
@@ -151,6 +158,18 @@ export class AppModule implements NestModule {
             };
           },
           inject: [ConfigService, LoggingService],
+        }),
+        BullModule.forRootAsync({
+          imports: [ConfigModule],
+          useFactory: (configService: ConfigService) => ({
+            connection: {
+              host: configService.getOrThrow<string>('redis.host'),
+              port: Number(configService.getOrThrow<string>('redis.port')),
+              username: configService.get<string>('redis.user'),
+              password: configService.get<string>('redis.pass'),
+            },
+          }),
+          inject: [ConfigService],
         }),
       ],
       providers: [

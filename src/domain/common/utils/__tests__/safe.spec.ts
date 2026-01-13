@@ -1,13 +1,17 @@
 import { faker } from '@faker-js/faker';
 import { getAddress } from 'viem';
 import { Builder } from '@/__tests__/builder';
+import { multisigTransactionBuilder } from '@/domain/safe/entities/__tests__/multisig-transaction.builder';
 import { Operation } from '@/domain/safe/entities/operation.entity';
 import { safeBuilder } from '@/domain/safe/entities/__tests__/safe.builder';
 import {
-  _getSafeTxDomain,
+  _getSafeDomain,
   _getSafeTxTypesAndMessage,
+  getBaseMultisigTransaction,
+  getSafeMessageMessageHash,
   getSafeTxHash,
 } from '@/domain/common/utils/safe';
+import { typedDataBuilder } from '@/routes/messages/entities/__tests__/typed-data.builder';
 import type { BaseMultisigTransaction } from '@/domain/common/utils/safe';
 import type { IBuilder } from '@/__tests__/builder';
 
@@ -46,6 +50,265 @@ function safeTxHashMultisigTransactionBuilder(): IBuilder<BaseMultisigTransactio
 }
 
 describe('Safe', () => {
+  describe('getBaseMultisigTransaction', () => {
+    it('should return a valid BaseMultisigTransaction', () => {
+      const multisigTransaction = multisigTransactionBuilder().build();
+
+      const result = getBaseMultisigTransaction(multisigTransaction);
+
+      expect(result).toEqual({
+        to: multisigTransaction.to,
+        value: multisigTransaction.value,
+        data: multisigTransaction.data,
+        operation: multisigTransaction.operation,
+        safeTxGas: multisigTransaction.safeTxGas,
+        baseGas: multisigTransaction.baseGas,
+        gasPrice: multisigTransaction.gasPrice,
+        gasToken: multisigTransaction.gasToken,
+        refundReceiver: multisigTransaction.refundReceiver,
+        nonce: multisigTransaction.nonce,
+      });
+    });
+  });
+
+  describe('getSafeMessageMessageHash', () => {
+    describe('generates a valid messageHash', () => {
+      it('should handle strings', () => {
+        const chainId = faker.string.numeric();
+        const safe = safeBuilder().build();
+        const message = faker.lorem.sentence();
+
+        expect(() =>
+          getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          }),
+        ).not.toThrow();
+      });
+
+      it('should handle typedData', () => {
+        const chainId = faker.string.numeric();
+        const safe = safeBuilder().build();
+        const message = typedDataBuilder().build();
+
+        expect(() =>
+          getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          }),
+        ).not.toThrow();
+      });
+
+      it.each(DOMAIN_WITHOUT_CHAIN_ID_VERSIONS)(
+        "should handle versions that don't include the chainId in the domain (%s)",
+        (version) => {
+          const chainId = faker.string.numeric();
+          const safe = safeBuilder().with('version', version).build();
+          const message = faker.helpers.arrayElement([
+            faker.lorem.sentence(),
+            typedDataBuilder().build(),
+          ]);
+
+          expect(() =>
+            getSafeMessageMessageHash({ chainId, message, safe }),
+          ).not.toThrow();
+        },
+      );
+
+      it.each(DOMAIN_WITH_CHAIN_ID_VERSIONS)(
+        'should handle versions that include the chainId in the domain (%s)',
+        (version) => {
+          const chainId = faker.string.numeric();
+          const safe = safeBuilder().with('version', version).build();
+          const message = faker.helpers.arrayElement([
+            faker.lorem.sentence(),
+            typedDataBuilder().build(),
+          ]);
+
+          expect(() =>
+            getSafeMessageMessageHash({ chainId, message, safe }),
+          ).not.toThrow();
+        },
+      );
+    });
+
+    describe.skip('examples', () => {
+      describe('strings', () => {
+        it('should generate a valid 1.0.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.0.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.1.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.1.1').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.2.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.2.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.3.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.3.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.4.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.4.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.4.1 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.4.1').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+      });
+
+      describe('typedData', () => {
+        it('should generate a valid 1.0.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.0.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.1.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.1.1').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.2.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.2.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.3.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.3.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.4.0 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.4.0').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+
+        it('should generate a valid 1.4.1 messageHash', () => {
+          const chainId = '';
+          const safe = safeBuilder().with('version', '1.4.1').build();
+          const message = '';
+
+          const result = getSafeMessageMessageHash({
+            chainId,
+            message: message,
+            safe,
+          });
+
+          expect(result).toBe('');
+        });
+      });
+    });
+  });
+
   describe('getSafeTxHash', () => {
     describe('generates a valid safeTxHash', () => {
       it('should handle valid transactions', () => {
@@ -223,8 +486,6 @@ describe('Safe', () => {
       'safeTxGas',
       'baseGas',
       'gasPrice',
-      'gasToken',
-      'refundReceiver',
     ])('should throw if the %s is not present', (key) => {
       const chainId = faker.string.numeric();
       const safe = safeBuilder().build();
@@ -257,7 +518,7 @@ describe('Safe', () => {
         const chainId = faker.string.numeric();
         const address = getAddress(faker.finance.ethereumAddress());
 
-        const result = _getSafeTxDomain({
+        const result = _getSafeDomain({
           address,
           version,
           chainId,
@@ -275,7 +536,7 @@ describe('Safe', () => {
         const chainId = faker.string.numeric();
         const address = getAddress(faker.finance.ethereumAddress());
 
-        const result = _getSafeTxDomain({
+        const result = _getSafeDomain({
           address,
           version,
           chainId,
@@ -304,12 +565,29 @@ describe('Safe', () => {
       expect(result.message.data).toEqual('0x');
     });
 
+    it.each<keyof BaseMultisigTransaction>(['gasToken', 'refundReceiver'])(
+      'should default a missing %s to a zero address if not present',
+      (key) => {
+        const transaction = safeTxHashMultisigTransactionBuilder()
+          .with(key, null)
+          .build();
+        const version = faker.helpers.arrayElement(TYPES_WITH_BASEGAS_VERSIONS);
+
+        const result = _getSafeTxTypesAndMessage({
+          transaction,
+          version,
+        });
+
+        expect(result.message[key]).toEqual(
+          '0x0000000000000000000000000000000000000000',
+        );
+      },
+    );
+
     it.each<keyof BaseMultisigTransaction>([
       'safeTxGas',
       'baseGas',
       'gasPrice',
-      'gasToken',
-      'refundReceiver',
     ])('should throw if %s is not present', (key) => {
       const transaction = safeTxHashMultisigTransactionBuilder()
         .with(key, null)

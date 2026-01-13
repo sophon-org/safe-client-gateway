@@ -10,12 +10,12 @@ It provides UI-oriented mappings and data structures for easier integration with
 
 ## Documentation
 
-- [Client Gateway OpenAPI specification](https://safe-client.safe.global/index.html)
+- [Client Gateway OpenAPI specification](https://safe-client.safe.global/api)
 - [Deploying the service](https://github.com/safe-global/safe-infrastructure)
 
 ## Requirements
 
-- Node.js v22.14.0 'Jod' LTS ([Node.js Release Schedule](https://nodejs.org/en/about/previous-releases)) – https://nodejs.org/en/
+- Node.js v22.15.0 'Jod' LTS ([Node.js Release Schedule](https://nodejs.org/en/about/previous-releases)) – https://nodejs.org/en/
 - Docker Compose – https://docs.docker.com/compose/
 
 ## Installation

@@ -1,5 +1,6 @@
 import { faker } from '@faker-js/faker';
 import type configuration from '@/config/entities/configuration';
+import { getAddress } from 'viem';
 
 export default (): ReturnType<typeof configuration> => ({
   about: {
@@ -32,6 +33,8 @@ export default (): ReturnType<typeof configuration> => ({
     exchange: { name: faker.string.sample(), mode: faker.string.sample() },
     queue: faker.string.sample(),
     prefetch: faker.number.int(),
+    heartbeatIntervalInSeconds: 60,
+    reconnectTimeInSeconds: 5,
   },
   application: {
     isProduction: faker.datatype.boolean(),
@@ -92,8 +95,21 @@ export default (): ReturnType<typeof configuration> => ({
     },
   },
   blockchain: {
+    blocklist: faker.helpers.multiple(
+      () => getAddress(faker.finance.ethereumAddress()),
+      { count: { min: 1, max: 5 } },
+    ),
     infura: {
       apiKey: faker.string.hexadecimal({ length: 32 }),
+    },
+  },
+  bridge: {
+    baseUri: faker.internet.url({ appendSlash: false }),
+    apiKey: faker.string.hexadecimal({ length: 32 }),
+  },
+  contracts: {
+    trustedForDelegateCall: {
+      maxSequentialPages: faker.number.int({ min: 1, max: 5 }),
     },
   },
   db: {
@@ -107,6 +123,7 @@ export default (): ReturnType<typeof configuration> => ({
       manualInitialization: true,
       migrationsRun: false,
       migrationsTableName: '_migrations',
+      cache: false,
     },
     connection: {
       postgres: {
@@ -126,6 +143,16 @@ export default (): ReturnType<typeof configuration> => ({
       },
     },
   },
+  earn: {
+    testnet: {
+      baseUri: faker.internet.url({ appendSlash: false }),
+      apiKey: faker.string.hexadecimal({ length: 32 }),
+    },
+    mainnet: {
+      baseUri: faker.internet.url({ appendSlash: false }),
+      apiKey: faker.string.hexadecimal({ length: 32 }),
+    },
+  },
   email: {
     applicationCode: faker.string.alphanumeric(),
     baseUri: faker.internet.url({ appendSlash: false }),
@@ -134,11 +161,13 @@ export default (): ReturnType<typeof configuration> => ({
     fromName: faker.person.fullName(),
   },
   expirationTimeInSeconds: {
+    deviatePercent: faker.number.int({ min: 10, max: 20 }),
     default: faker.number.int(),
     rpc: faker.number.int(),
-    holesky: faker.number.int(),
+    hoodi: faker.number.int(),
     indexing: faker.number.int(),
     staking: faker.number.int(),
+    zerionPositions: faker.number.int(),
     notFound: {
       default: faker.number.int(),
       contract: faker.number.int(),
@@ -149,6 +178,7 @@ export default (): ReturnType<typeof configuration> => ({
   features: {
     email: false,
     zerionBalancesChainIds: ['137'],
+    zerionPositions: false,
     debugLogs: false,
     configHooksDebugLogs: false,
     auth: false,
@@ -156,7 +186,6 @@ export default (): ReturnType<typeof configuration> => ({
     counterfactualBalances: false,
     accounts: false,
     users: false,
-    pushNotifications: false,
     hookHttpPostEvent: false,
     improvedAddressPoisoning: false,
     signatureVerification: {
@@ -167,7 +196,14 @@ export default (): ReturnType<typeof configuration> => ({
       api: true,
       proposal: true,
     },
+    messageVerification: true,
     ethSign: true,
+    trustedDelegateCall: false,
+    trustedForDelegateCallContractsList: false,
+    filterValueParsing: false,
+    vaultTransactionsMapping: false,
+    lifiTransactionsMapping: false,
+    cacheInFlightRequests: false,
   },
   httpClient: { requestTimeout: faker.number.int() },
   locking: {
@@ -200,16 +236,15 @@ export default (): ReturnType<typeof configuration> => ({
     history: {
       maxNestedTransfers: faker.number.int({ min: 1, max: 5 }),
     },
+    transactionData: {
+      maxTokenInfoIndexSize: faker.number.int({ min: 1, max: 5 }),
+    },
     safe: {
       maxOverviews: faker.number.int({ min: 1, max: 5 }),
     },
   },
   owners: {
     ownersTtlSeconds: faker.number.int(),
-  },
-  portfolio: {
-    baseUri: faker.internet.url({ appendSlash: false }),
-    apiKey: faker.string.hexadecimal({ length: 32 }),
   },
   pushNotifications: {
     baseUri: faker.internet.url({ appendSlash: false }),
@@ -218,15 +253,18 @@ export default (): ReturnType<typeof configuration> => ({
       clientEmail: faker.internet.email(),
       privateKey: faker.string.alphanumeric(),
     },
+    getSubscribersBySafeTtlMilliseconds: faker.number.int({ min: 1, max: 100 }),
+    oauth2TokenTtlBufferInSeconds: faker.number.int({ min: 30, max: 100 }),
   },
   redis: {
     user: process.env.REDIS_USER,
     pass: process.env.REDIS_PASS,
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || '6379',
-    timeout: process.env.REDIS_TIMEOUT || 1 * 1_000, // Milliseconds
     disableOfflineQueue:
       process.env.REDIS_DISABLE_OFFLINE_QUEUE?.toString() === 'true',
+    connectTimeout: process.env.REDIS_CONNECT_TIMEOUT || 10_000,
+    keepAlive: process.env.REDIS_KEEP_ALIVE || 30_000,
   },
   relay: {
     baseUri: faker.internet.url({ appendSlash: false }),
@@ -252,11 +290,32 @@ export default (): ReturnType<typeof configuration> => ({
       maxSequentialPages: faker.number.int(),
     },
   },
+  safeDataDecoder: {
+    baseUri: faker.internet.url({ appendSlash: false }),
+  },
   safeTransaction: {
     useVpcUrl: false,
   },
   safeWebApp: {
     baseUri: faker.internet.url({ appendSlash: false }),
+  },
+  spaces: {
+    addressBooks: {
+      maxItems: faker.number.int({ min: 10, max: 20 }),
+    },
+    maxSafesPerSpace: faker.number.int({ min: 5, max: 10 }),
+    maxSpaceCreationsPerUser: faker.number.int({ min: 100, max: 200 }),
+    maxInvites: faker.number.int({ min: 5, max: 10 }),
+    rateLimit: {
+      creation: {
+        max: faker.number.int({ min: 100, max: 200 }),
+        windowSeconds: faker.number.int({ min: 100, max: 200 }),
+      },
+      addressBookUpsertion: {
+        max: faker.number.int({ min: 100, max: 200 }),
+        windowSeconds: faker.number.int({ min: 100, max: 200 }),
+      },
+    },
   },
   staking: {
     testnet: {
@@ -272,8 +331,10 @@ export default (): ReturnType<typeof configuration> => ({
     api: {
       1: faker.internet.url({ appendSlash: false }),
       100: faker.internet.url({ appendSlash: false }),
+      137: faker.internet.url({ appendSlash: false }),
       8453: faker.internet.url({ appendSlash: false }),
       42161: faker.internet.url({ appendSlash: false }),
+      43114: faker.internet.url({ appendSlash: false }),
       11155111: faker.internet.url({ appendSlash: false }),
     },
     explorerBaseUri: faker.internet.url({ appendSlash: true }),
@@ -285,6 +346,8 @@ export default (): ReturnType<typeof configuration> => ({
     fileStorage: {
       type: 'local',
       aws: {
+        accessKeyId: 'dummy',
+        secretAccessKey: 'dummy',
         bucketName: faker.string.alphanumeric(),
         basePath: faker.system.directoryPath(),
       },
@@ -293,7 +356,34 @@ export default (): ReturnType<typeof configuration> => ({
       },
     },
   },
-  users: {
-    maxInvites: faker.number.int({ min: 5, max: 10 }),
+  csvExport: {
+    fileStorage: {
+      type: 'local',
+      aws: {
+        accessKeyId: 'dummy',
+        secretAccessKey: 'dummy',
+        bucketName: faker.string.alphanumeric(),
+        basePath: faker.system.directoryPath(),
+      },
+      local: {
+        baseDir: 'assets/csv-export',
+      },
+    },
+    signedUrlTtlSeconds: faker.number.int(),
+    queue: {
+      removeOnComplete: {
+        age: faker.number.int({ min: 0, max: 10000 }),
+        count: faker.number.int({ min: 0, max: 10 }),
+      },
+      removeOnFail: {
+        age: faker.number.int({ min: 0, max: 10000 }),
+        count: faker.number.int({ min: 0, max: 10 }),
+      },
+      backoff: {
+        type: 'exponential',
+        delay: faker.number.int({ min: 0, max: 2000 }),
+      },
+      attempts: faker.number.int({ min: 0, max: 3 }),
+    },
   },
 });

@@ -1,18 +1,15 @@
 import { faker } from '@faker-js/faker';
 import type { INestApplication } from '@nestjs/common';
-import type { TestingModule } from '@nestjs/testing';
-import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppProvider } from '@/__tests__/test-app.provider';
+import { createTestModule } from '@/__tests__/testing-module';
 import { IConfigurationService } from '@/config/configuration.service.interface';
 import configuration from '@/config/entities/__tests__/configuration';
-import { TestCacheModule } from '@/datasources/cache/__tests__/test.cache.module';
-import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
 import { chainBuilder } from '@/domain/chains/entities/__tests__/chain.builder';
 import {
   dataDecodedBuilder,
   dataDecodedParameterBuilder,
-} from '@/domain/data-decoder/v1/entities/__tests__/data-decoded.builder';
+} from '@/domain/data-decoder/v2/entities/__tests__/data-decoded.builder';
 import { pageBuilder } from '@/domain/entities/__tests__/page.builder';
 import {
   creationTransactionBuilder,
@@ -35,16 +32,13 @@ import {
   toJson as nativeTokenTransferToJson,
 } from '@/domain/safe/entities/__tests__/native-token-transfer.builder';
 import { safeBuilder } from '@/domain/safe/entities/__tests__/safe.builder';
-import { tokenBuilder } from '@/domain/tokens/__tests__/token.builder';
-import { TokenType } from '@/domain/tokens/entities/token.entity';
-import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
+import {
+  erc20TokenBuilder,
+  erc721TokenBuilder,
+} from '@/domain/tokens/__tests__/token.builder';
 import type { Transfer } from '@/domain/safe/entities/transfer.entity';
 import type { INetworkService } from '@/datasources/network/network.service.interface';
 import { NetworkService } from '@/datasources/network/network.service.interface';
-import { AppModule } from '@/app.module';
-import { CacheModule } from '@/datasources/cache/cache.module';
-import { RequestScopedLoggingModule } from '@/logging/logging.module';
-import { NetworkModule } from '@/datasources/network/network.module';
 import {
   erc20TransferBuilder,
   toJson as erc20TransferToJson,
@@ -56,21 +50,14 @@ import {
 import type { TransactionItem } from '@/routes/transactions/entities/transaction-item.entity';
 import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
 import { getAddress } from 'viem';
-import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
-import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
 import type { Server } from 'net';
-import { PostgresDatabaseModuleV2 } from '@/datasources/db/v2/postgres-database.module';
-import { TestPostgresDatabaseModuleV2 } from '@/datasources/db/v2/test.postgres-database.module';
-import { PostgresDatabaseModule } from '@/datasources/db/v1/postgres-database.module';
-import { TestPostgresDatabaseModule } from '@/datasources/db/__tests__/test.postgres-database.module';
-import { TestTargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/__tests__/test.targeted-messaging.datasource.module';
-import { TargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/targeted-messaging.datasource.module';
 import { rawify } from '@/validation/entities/raw.entity';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
 describe('Transactions History Controller (Unit)', () => {
   let app: INestApplication<Server>;
   let safeConfigUrl: string | undefined;
+  let safeDecoderUrl: string | undefined;
   let networkService: jest.MockedObjectDeep<INetworkService>;
   let configurationService: jest.MockedObjectDeep<IConfigurationService>;
 
@@ -87,27 +74,11 @@ describe('Transactions History Controller (Unit)', () => {
       },
     });
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule.register(testConfiguration)],
-    })
-      .overrideModule(PostgresDatabaseModule)
-      .useModule(TestPostgresDatabaseModule)
-      .overrideModule(TargetedMessagingDatasourceModule)
-      .useModule(TestTargetedMessagingDatasourceModule)
-      .overrideModule(CacheModule)
-      .useModule(TestCacheModule)
-      .overrideModule(RequestScopedLoggingModule)
-      .useModule(TestLoggingModule)
-      .overrideModule(NetworkModule)
-      .useModule(TestNetworkModule)
-      .overrideModule(QueuesApiModule)
-      .useModule(TestQueuesApiModule)
-      .overrideModule(PostgresDatabaseModuleV2)
-      .useModule(TestPostgresDatabaseModuleV2)
-      .compile();
+    const moduleFixture = await createTestModule({ config: testConfiguration });
 
     configurationService = moduleFixture.get(IConfigurationService);
     safeConfigUrl = configurationService.get('safeConfig.baseUri');
+    safeDecoderUrl = configurationService.get('safeDataDecoder.baseUri');
     networkService = moduleFixture.get(NetworkService);
 
     app = await new TestAppProvider().provide(moduleFixture);
@@ -299,13 +270,11 @@ describe('Transactions History Controller (Unit)', () => {
     const chain = chainBuilder().build();
     const moduleTransaction = moduleTransactionToJson(
       moduleTransactionBuilder()
-        .with('dataDecoded', null)
         .with('executionDate', new Date('2022-12-06T23:00:00Z'))
         .build(),
     );
     const multisigTransaction = await multisigTransactionBuilder()
       .with('safe', safe.address)
-      .with('dataDecoded', null)
       .with('origin', null)
       .with('executionDate', new Date('2022-12-25T00:00:00Z'))
       .buildWithConfirmations({
@@ -381,7 +350,6 @@ describe('Transactions History Controller (Unit)', () => {
     const chainId = chainResponse.chainId;
     const moduleTransaction = moduleTransactionToJson(
       moduleTransactionBuilder()
-        .with('dataDecoded', null)
         .with('executionDate', new Date('2022-12-31T22:09:36Z'))
         .build(),
     );
@@ -431,11 +399,9 @@ describe('Transactions History Controller (Unit)', () => {
     const chainResponse = chainBuilder().build();
     const chainId = chainResponse.chainId;
     const moduleTransaction1 = moduleTransactionBuilder()
-      .with('dataDecoded', null)
       .with('executionDate', new Date('2022-12-31T21:09:36Z'))
       .build();
     const moduleTransaction2 = moduleTransactionBuilder()
-      .with('dataDecoded', null)
       .with('executionDate', new Date('2022-12-31T23:09:36Z'))
       .build();
     const safe = safeBuilder().build();
@@ -501,11 +467,9 @@ describe('Transactions History Controller (Unit)', () => {
     const chainResponse = chainBuilder().build();
     const chainId = chainResponse.chainId;
     const moduleTransaction1 = moduleTransactionBuilder()
-      .with('dataDecoded', null)
       .with('executionDate', new Date('2022-12-31T21:09:36Z'))
       .build();
     const moduleTransaction2 = moduleTransactionBuilder()
-      .with('dataDecoded', null)
       .with('executionDate', new Date('2022-12-31T23:09:36Z'))
       .build();
     const safe = safeBuilder().build();
@@ -584,30 +548,27 @@ describe('Transactions History Controller (Unit)', () => {
       .with('isExecuted', true)
       .with('isSuccessful', true)
       .with('origin', null)
-      .with(
-        'dataDecoded',
-        dataDecodedBuilder()
-          .with('method', 'transfer')
-          .with('parameters', [
-            dataDecodedParameterBuilder()
-              .with('name', 'to')
-              .with('type', 'address')
-              .with('value', multisigTransactionToAddress)
-              .build(),
-            dataDecodedParameterBuilder()
-              .with('name', 'value')
-              .with('type', 'uint256')
-              .with('value', multisigTransactionValue)
-              .build(),
-          ])
-          .build(),
-      )
       .with('confirmationsRequired', 2)
       .buildWithConfirmations({
         safe,
         signers,
         chainId: chain.chainId,
       });
+    const multisigTransactionDataDecoded = dataDecodedBuilder()
+      .with('method', 'transfer')
+      .with('parameters', [
+        dataDecodedParameterBuilder()
+          .with('name', 'to')
+          .with('type', 'address')
+          .with('value', multisigTransactionToAddress)
+          .build(),
+        dataDecodedParameterBuilder()
+          .with('name', 'value')
+          .with('type', 'uint256')
+          .with('value', multisigTransactionValue)
+          .build(),
+      ])
+      .build();
     const nativeTokenTransfer = nativeTokenTransferBuilder()
       .with('executionDate', new Date('2022-08-04T12:44:22Z'))
       .with('to', safe.address)
@@ -618,8 +579,7 @@ describe('Transactions History Controller (Unit)', () => {
         nativeTokenTransferToJson(nativeTokenTransfer) as Transfer,
       ])
       .build();
-    const tokenResponse = tokenBuilder()
-      .with('type', TokenType.Erc20)
+    const tokenResponse = erc20TokenBuilder()
       .with('address', getAddress(multisigTransaction.to))
       .build();
     networkService.get.mockImplementation(({ url }) => {
@@ -649,6 +609,20 @@ describe('Transactions History Controller (Unit)', () => {
       }
       if (url === getTokenUrlPattern) {
         return Promise.resolve({ data: rawify(tokenResponse), status: 200 });
+      }
+      return Promise.reject(new Error(`Could not match ${url}`));
+    });
+    networkService.post.mockImplementation(({ url, data }) => {
+      if (
+        url === `${safeDecoderUrl}/api/v1/data-decoder` &&
+        data &&
+        'data' in data &&
+        data.data === multisigTransaction.data
+      ) {
+        return Promise.resolve({
+          data: rawify(multisigTransactionDataDecoded),
+          status: 200,
+        });
       }
       return Promise.reject(new Error(`Could not match ${url}`));
     });
@@ -765,9 +739,7 @@ describe('Transactions History Controller (Unit)', () => {
     const safeAddress = faker.finance.ethereumAddress();
     const chainResponse = chainBuilder().build();
     const chainId = chainResponse.chainId;
-    const moduleTransaction = moduleTransactionBuilder()
-      .with('dataDecoded', null)
-      .build();
+    const moduleTransaction = moduleTransactionBuilder().build();
     const safe = safeBuilder().build();
     const allTransactionsResponse = {
       count: 2,
@@ -849,7 +821,7 @@ describe('Transactions History Controller (Unit)', () => {
     const limit = 5;
     const offset = 5;
     const moduleTransaction = moduleTransactionToJson(
-      moduleTransactionBuilder().with('dataDecoded', null).build(),
+      moduleTransactionBuilder().build(),
     );
     const safe = safeBuilder().build();
     const clientNextCursor = `cursor=limit%3D${limit}%26offset%3D10`;
@@ -973,8 +945,8 @@ describe('Transactions History Controller (Unit)', () => {
   it('Untrusted token transfers are ignored by default', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const untrustedToken = tokenBuilder().with('trusted', false).build();
-    const trustedToken = tokenBuilder().with('trusted', true).build();
+    const untrustedToken = erc20TokenBuilder().with('trusted', false).build();
+    const trustedToken = erc20TokenBuilder().with('trusted', true).build();
     // Use same date so that groups are created deterministically
     const date = faker.date.recent();
     const transfers = [
@@ -1049,7 +1021,7 @@ describe('Transactions History Controller (Unit)', () => {
   it('Should return an empty array with no date labels if all the token transfers are untrusted', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const untrustedToken = tokenBuilder().with('trusted', false).build();
+    const untrustedToken = erc20TokenBuilder().with('trusted', false).build();
     // Use same date so that groups are created deterministically
     const date = faker.date.recent();
     const oneDayAfter = new Date(date.getTime() + 1000 * 60 * 60 * 24);
@@ -1133,8 +1105,8 @@ describe('Transactions History Controller (Unit)', () => {
   it('Should not return a date label if all the token transfers for that date are untrusted', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const untrustedToken = tokenBuilder().with('trusted', false).build();
-    const trustedToken = tokenBuilder().with('trusted', true).build();
+    const untrustedToken = erc20TokenBuilder().with('trusted', false).build();
+    const trustedToken = erc20TokenBuilder().with('trusted', true).build();
     // Use same date so that groups are created deterministically
     const date = faker.date.recent();
     const oneDayAfter = new Date(date.getTime() + 1000 * 60 * 60 * 24);
@@ -1263,8 +1235,8 @@ describe('Transactions History Controller (Unit)', () => {
   it('Untrusted transfers are returned when trusted=false', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const untrustedToken = tokenBuilder().with('trusted', false).build();
-    const trustedToken = tokenBuilder().with('trusted', true).build();
+    const untrustedToken = erc20TokenBuilder().with('trusted', false).build();
+    const trustedToken = erc20TokenBuilder().with('trusted', true).build();
     // Use same date so that groups are created deterministically
     const date = faker.date.recent();
     const transfers = [
@@ -1348,7 +1320,7 @@ describe('Transactions History Controller (Unit)', () => {
   it('Nested transfers with a value of zero are not returned', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const trustedToken = tokenBuilder().with('trusted', true).build();
+    const trustedToken = erc20TokenBuilder().with('trusted', true).build();
     // Use same date so that groups are created deterministically
     const date = faker.date.recent();
     const transfers = [
@@ -1422,14 +1394,10 @@ describe('Transactions History Controller (Unit)', () => {
   it('ERC721 transfers marked as non-trusted are returned', async () => {
     const safe = safeBuilder().build();
     const chain = chainBuilder().build();
-    const notTrustedErc721 = tokenBuilder()
+    const notTrustedErc721 = erc721TokenBuilder()
       .with('trusted', false)
-      .with('type', TokenType.Erc721)
       .build();
-    const trustedErc721 = tokenBuilder()
-      .with('trusted', true)
-      .with('type', TokenType.Erc721)
-      .build();
+    const trustedErc721 = erc721TokenBuilder().with('trusted', true).build();
     // Use the same date so that groups are created deterministically
     const date = faker.date.recent();
     const transfers = [

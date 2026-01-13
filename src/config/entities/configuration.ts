@@ -1,3 +1,4 @@
+import { getBlocklist } from '@/config/entities/blocklist.config';
 import { randomBytes } from 'crypto';
 
 // Custom configuration for the application
@@ -6,7 +7,7 @@ import { randomBytes } from 'crypto';
 export default () => ({
   about: {
     name: 'safe-client-gateway',
-    version: process.env.APPLICATION_VERSION || '1.58.0',
+    version: process.env.APPLICATION_VERSION || 'v1.91.0',
     buildNumber: process.env.APPLICATION_BUILD_NUMBER,
   },
   accounts: {
@@ -58,6 +59,10 @@ export default () => ({
       process.env.AMQP_PREFETCH != null
         ? parseInt(process.env.AMQP_PREFETCH)
         : 100,
+    heartbeatIntervalInSeconds: +(
+      process.env.AMQP_HEARBEAT_INTERVAL_SECONDS || 60
+    ),
+    reconnectTimeInSeconds: +(process.env.AMQP_RECONNECT_TIME_SECONDS || 5),
   },
   application: {
     isProduction: process.env.CGW_ENV === 'production',
@@ -145,8 +150,20 @@ export default () => ({
     },
   },
   blockchain: {
+    blocklist: getBlocklist(),
     infura: {
       apiKey: process.env.INFURA_API_KEY,
+    },
+  },
+  bridge: {
+    baseUri: 'https://li.quest',
+    apiKey: process.env.BRIDGE_API_KEY,
+  },
+  contracts: {
+    trustedForDelegateCall: {
+      maxSequentialPages: parseInt(
+        process.env.TRUSTED_CONTRACTS_MAX_SEQUENTIAL_PAGES ?? `${3}`,
+      ),
     },
   },
   db: {
@@ -169,6 +186,25 @@ export default () => ({
       // The name of the table where migrations are stored. Uses the environment variable value or defaults to '_migrations'.
       migrationsTableName:
         process.env.ORM_MIGRATION_TABLE_NAME || '_migrations',
+      cache:
+        process.env.ORM_CACHE_ENABLED?.toLowerCase() === 'true'
+          ? {
+              type: 'redis',
+              options: {
+                socket: {
+                  host: process.env.REDIS_HOST || 'localhost',
+                  port: process.env.REDIS_PORT || '6379',
+                },
+                username: process.env.REDIS_USER,
+                password: process.env.REDIS_PASS,
+              },
+              duration: parseInt(process.env.ORM_CACHE_DURATION ?? `${1000}`),
+              /**
+               * @todo Fix the underlying issue with the Redis client shutting down
+               */
+              ignoreErrors: true,
+            }
+          : false,
     },
     connection: {
       postgres: {
@@ -192,6 +228,18 @@ export default () => ({
         },
       },
     },
+  }, // TODO: Unify base URLs with staking
+  earn: {
+    testnet: {
+      baseUri:
+        process.env.STAKING_TESTNET_API_BASE_URI ||
+        'https://api.testnet.kiln.fi',
+      apiKey: process.env.EARN_TESTNET_API_KEY,
+    },
+    mainnet: {
+      baseUri: process.env.STAKING_API_BASE_URI || 'https://api.kiln.fi',
+      apiKey: process.env.EARN_MAINNET_API_KEY,
+    },
   },
   email: {
     applicationCode: process.env.EMAIL_API_APPLICATION_CODE,
@@ -201,11 +249,15 @@ export default () => ({
     fromName: process.env.EMAIL_API_FROM_NAME || 'Safe',
   },
   expirationTimeInSeconds: {
+    deviatePercent: parseInt(process.env.EXPIRATION_DEVIATE_PERCENT ?? `${10}`),
     default: parseInt(process.env.EXPIRATION_TIME_DEFAULT_SECONDS ?? `${60}`),
     rpc: parseInt(process.env.EXPIRATION_TIME_RPC_SECONDS ?? `${15}`),
-    holesky: parseInt(process.env.HOLESKY_EXPIRATION_TIME_SECONDS ?? `${60}`),
+    hoodi: parseInt(process.env.HOODI_EXPIRATION_TIME_SECONDS ?? `${60}`),
     indexing: parseInt(process.env.EXPIRATION_TIME_INDEXING_SECONDS ?? `${5}`),
     staking: parseInt(process.env.EXPIRATION_TIME_STAKING_SECONDS ?? `${60}`),
+    zerionPositions: parseInt(
+      process.env.EXPIRATION_TIME_POSITIONS_SECONDS ?? `${300}`,
+    ),
     notFound: {
       default: parseInt(
         process.env.DEFAULT_NOT_FOUND_EXPIRE_TIME_SECONDS ?? `${30}`,
@@ -229,6 +281,8 @@ export default () => ({
     email: process.env.FF_EMAIL?.toLowerCase() === 'true',
     zerionBalancesChainIds:
       process.env.FF_ZERION_BALANCES_CHAIN_IDS?.split(',') ?? [],
+    zerionPositions:
+      process.env.FF_ZERION_POSITIONS_DISABLED?.toLowerCase() !== 'true',
     debugLogs: process.env.FF_DEBUG_LOGS?.toLowerCase() === 'true',
     configHooksDebugLogs:
       process.env.FF_CONFIG_HOOKS_DEBUG_LOGS?.toLowerCase() === 'true',
@@ -238,9 +292,6 @@ export default () => ({
       process.env.FF_COUNTERFACTUAL_BALANCES?.toLowerCase() === 'true',
     accounts: process.env.FF_ACCOUNTS?.toLowerCase() === 'true',
     users: process.env.FF_USERS?.toLowerCase() === 'true',
-    // TODO: When enabled, we must add `db` as a requirement alongside `redis`
-    pushNotifications:
-      process.env.FF_PUSH_NOTIFICATIONS?.toLowerCase() === 'true',
     hookHttpPostEvent:
       process.env.FF_HOOK_HTTP_POST_EVENT?.toLowerCase() === 'true',
     improvedAddressPoisoning:
@@ -256,7 +307,24 @@ export default () => ({
         process.env.FF_SIGNATURE_VERIFICATION_PROPOSAL?.toLowerCase() ===
         'true',
     },
+    messageVerification:
+      process.env.FF_MESSAGE_VERIFICATION?.toLowerCase() === 'true',
     ethSign: process.env.FF_ETH_SIGN?.toLowerCase() === 'true',
+    trustedDelegateCall:
+      process.env.FF_TRUSTED_DELEGATE_CALL?.toLowerCase() === 'true',
+    // TODO: Remove this feature flag once the feature is established.
+    trustedForDelegateCallContractsList:
+      process.env.FF_TRUSTED_FOR_DELEGATE_CALL_CONTRACTS_LIST?.toLowerCase() ===
+      'true',
+    filterValueParsing:
+      process.env.FF_FILTER_VALUE_PARSING?.toLowerCase() === 'true',
+    vaultTransactionsMapping:
+      process.env.FF_VAULT_TRANSACTIONS_MAPPING?.toLowerCase() === 'true',
+    lifiTransactionsMapping:
+      process.env.FF_LIFITRANSACTIONS_MAPPING?.toLowerCase() === 'true',
+    cacheInFlightRequests:
+      process.env.HTTP_CLIENT_CACHE_IN_FLIGHT_REQUESTS?.toLowerCase() ===
+      'true',
   },
   httpClient: {
     // Timeout in milliseconds to be used for the HTTP client.
@@ -305,14 +373,12 @@ export default () => ({
         process.env.MAX_NESTED_TRANSFERS ?? `${100}`,
       ),
     },
+    transactionData: {
+      maxTokenInfoIndexSize: parseInt(process.env.MAX_TOKEN_INFO ?? `${100}`),
+    },
     safe: {
       maxOverviews: parseInt(process.env.MAX_SAFE_OVERVIEWS ?? `${10}`),
     },
-  },
-  portfolio: {
-    baseUri:
-      process.env.PORTFOLIO_API_BASE_URI || 'https://octav-api.hasura.app',
-    apiKey: process.env.PORTFOLIO_API_KEY || 'TODO',
   },
   pushNotifications: {
     baseUri:
@@ -325,15 +391,24 @@ export default () => ({
       privateKey:
         process.env.PUSH_NOTIFICATIONS_API_SERVICE_ACCOUNT_PRIVATE_KEY,
     },
+    getSubscribersBySafeTtlMilliseconds: +(
+      process.env.PUSH_NOTIFICATIONS_GET_SUBSCRIBERS_BY_SAFE_TTL_MILLISECONDS ||
+      60 * 1_000
+    ),
+    oauth2TokenTtlBufferInSeconds: parseInt(
+      process.env.PUSH_NOTIFICATIONS_API_OAUTH2_TOKEN_TTL_BUFFER_IN_SECONDS ??
+        `${120}`,
+    ),
   },
   redis: {
     user: process.env.REDIS_USER,
     pass: process.env.REDIS_PASS,
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || '6379',
-    timeout: process.env.REDIS_TIMEOUT || 2 * 1_000, // Milliseconds
     disableOfflineQueue:
       process.env.REDIS_DISABLE_OFFLINE_QUEUE?.toString() === 'true',
+    connectTimeout: process.env.REDIS_CONNECT_TIMEOUT || 10_000,
+    keepAlive: process.env.REDIS_KEEP_ALIVE || 30_000,
   },
   relay: {
     baseUri:
@@ -376,11 +451,46 @@ export default () => ({
       ),
     },
   },
+  safeDataDecoder: {
+    baseUri:
+      process.env.SAFE_DATA_DECODER_BASE_URI ||
+      'https://safe-decoder.safe.global',
+  },
   safeTransaction: {
     useVpcUrl: process.env.USE_TX_SERVICE_VPC_URL?.toLowerCase() === 'true',
   },
   safeWebApp: {
     baseUri: process.env.SAFE_WEB_APP_BASE_URI || 'https://app.safe.global',
+  },
+  spaces: {
+    addressBooks: {
+      maxItems: parseInt(
+        process.env.SPACES_MAX_ADDRESS_BOOK_ITEMS_PER_SPACE ?? `${500}`,
+      ),
+    },
+    maxSafesPerSpace: parseInt(
+      process.env.SPACES_MAX_SAFES_PER_SPACE ?? `${10}`,
+    ),
+    maxSpaceCreationsPerUser: parseInt(
+      process.env.MAX_SPACE_CREATIONS_PER_USER ?? `${3}`,
+    ),
+    maxInvites: parseInt(process.env.SPACES_MAX_INVITES ?? `${50}`),
+    rateLimit: {
+      creation: {
+        max: parseInt(process.env.SPACES_RATE_LIMIT_MAX ?? `${10}`),
+        windowSeconds: parseInt(
+          process.env.SPACES_RATE_LIMIT_WINDOW_SECONDS ?? `${600}`,
+        ),
+      },
+      addressBookUpsertion: {
+        max: parseInt(
+          process.env.SPACES_ADDRESS_BOOK_RATE_LIMIT_MAX ?? `${500}`,
+        ),
+        windowSeconds: parseInt(
+          process.env.SPACES_ADDRESS_BOOK_RATE_LIMIT_WINDOW_SECONDS ?? `${600}`,
+        ),
+      },
+    },
   },
   staking: {
     testnet: {
@@ -398,8 +508,10 @@ export default () => ({
     api: {
       1: 'https://api.cow.fi/mainnet',
       100: 'https://api.cow.fi/xdai',
+      137: 'https://api.cow.fi/polygon',
       8453: 'https://api.cow.fi/base',
       42161: 'https://api.cow.fi/arbitrum_one',
+      43114: 'https://api.cow.fi/avalanche',
       11155111: 'https://api.cow.fi/sepolia',
     },
     explorerBaseUri:
@@ -428,9 +540,9 @@ export default () => ({
         // This will be ignored if the TARGETED_MESSAGING_FILE_STORAGE_TYPE is set to 'local'.
         // For reference, these environment variables should be present in the environment,
         // but they are not transferred to the memory/configuration file:
-        // AWS_ACCESS_KEY_ID
-        // AWS_SECRET_ACCESS_KEY
         // AWS_REGION
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
         bucketName:
           process.env.AWS_STORAGE_BUCKET_NAME || 'safe-client-gateway',
         basePath: process.env.AWS_S3_BASE_PATH || 'assets/targeted-messaging',
@@ -443,7 +555,57 @@ export default () => ({
       },
     },
   },
-  users: {
-    maxInvites: 50,
+  csvExport: {
+    fileStorage: {
+      // The type of file storage to use. Defaults to 'local'.
+      // Supported values: 'aws', 'local'
+      type: process.env.CSV_EXPORT_FILE_STORAGE_TYPE || 'local',
+      aws: {
+        // This will be ignored if the CSV_EXPORT_FILE_STORAGE_TYPE is set to 'local'.
+        // For reference, these environment variables should be present in the environment,
+        // but they are not transferred to the memory/configuration file:
+        // AWS_REGION
+        accessKeyId: process.env.CSV_AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.CSV_AWS_SECRET_ACCESS_KEY,
+        bucketName:
+          process.env.CSV_AWS_STORAGE_BUCKET_NAME || 'safe-client-gateway',
+        basePath: process.env.CSV_AWS_S3_BASE_PATH || 'assets/csv-export',
+      },
+      local: {
+        // This will be ignored if the CSV_EXPORT_FILE_STORAGE_TYPE is set to 'aws'.
+        baseDir: process.env.CSV_EXPORT_LOCAL_BASE_DIR || 'assets/csv-export',
+      },
+    },
+    // The time-to-live (TTL) for the signed URLs generated for CSV exports.
+    // Defaults to 3600 seconds (1 hour).
+    signedUrlTtlSeconds: parseInt(
+      process.env.CSV_EXPORT_SIGNED_URL_TTL_SECONDS ?? `${60 * 60}`,
+    ),
+    // BullMq queue configuration for CSV exports.
+    queue: {
+      removeOnComplete: {
+        age: parseInt(
+          process.env.CSV_EXPORT_QUEUE_REMOVE_ON_COMPLETE_AGE ?? `${86400}`,
+        ), // 24 hours
+        count: parseInt(
+          process.env.CSV_EXPORT_QUEUE_REMOVE_ON_COMPLETE_COUNT ?? `${1000}`,
+        ), // last 1000
+      },
+      removeOnFail: {
+        age: parseInt(
+          process.env.CSV_EXPORT_QUEUE_REMOVE_ON_FAIL_AGE ?? `${43200}`,
+        ), // 12 hours
+        count: parseInt(
+          process.env.CSV_EXPORT_QUEUE_REMOVE_ON_FAIL_COUNT ?? `${100}`,
+        ), // last 100
+      },
+      backoff: {
+        type: process.env.CSV_EXPORT_QUEUE_BACKOFF_TYPE || 'exponential',
+        delay: parseInt(
+          process.env.CSV_EXPORT_QUEUE_BACKOFF_DELAY ?? `${2000}`,
+        ), // 2 seconds
+      },
+      attempts: parseInt(process.env.CSV_EXPORT_QUEUE_ATTEMPTS ?? `${3}`),
+    },
   },
 });

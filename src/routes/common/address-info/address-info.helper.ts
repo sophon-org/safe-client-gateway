@@ -25,6 +25,10 @@ export class AddressInfoHelper {
    * The promise can be rejected if the address info cannot be retrieved for
    * any specified {@link source}
    *
+   * The function will try to get the address info from the provided sources
+   * in the order they are provided. If the address info cannot be retrieved
+   * from a source, the next source will be tried.
+   *
    * @param chainId - the chain id where the source exists
    * @param address - the address of the source to which we want to retrieve its metadata
    * @param sources - a collection of {@link Source} to which we want to retrieve its metadata
@@ -59,7 +63,7 @@ export class AddressInfoHelper {
    * @param address - the address of the source to which we want to retrieve its metadata
    * @param sources - a collection of {@link Source} to which we want to retrieve its metadata
    */
-  getOrDefault(
+  async getOrDefault(
     chainId: string,
     address: `0x${string}`,
     sources: Array<Source>,
@@ -76,7 +80,7 @@ export class AddressInfoHelper {
    * @param addresses - the collection of addresses to which we want to retrieve the respective metadata
    * @param sources - a collection of {@link Source} to which we want to retrieve its metadata
    */
-  getCollection(
+  async getCollection(
     chainId: string,
     addresses: Array<`0x${string}`>,
     sources: Array<Source>,
@@ -91,7 +95,7 @@ export class AddressInfoHelper {
     );
   }
 
-  private _getFromSource(
+  private async _getFromSource(
     chainId: string,
     address: `0x${string}`,
     source: Source,
@@ -102,7 +106,7 @@ export class AddressInfoHelper {
           .getContract({ chainId, contractAddress: address })
           .then((c) => {
             const name = c.displayName || c.name;
-            return new AddressInfo(c.address, name, c.logoUri);
+            return new AddressInfo(c.address, name, c.logoUrl);
           });
       case 'TOKEN':
         return this.tokenRepository

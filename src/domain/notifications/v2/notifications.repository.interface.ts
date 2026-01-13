@@ -27,8 +27,6 @@ export interface INotificationsRepositoryV2 {
     safeAddress: `0x${string}`;
   }): Promise<Array<NotificationType>>;
 
-  deleteDeviceAndSubscriptions(deviceUUid: UUID): Promise<void>;
-
   getSubscribersBySafe(args: {
     chainId: string;
     safeAddress: `0x${string}`;
@@ -39,6 +37,15 @@ export interface INotificationsRepositoryV2 {
       cloudMessagingToken: string;
     }>
   >;
+
+  deleteAllSubscriptions(args: {
+    subscriptions: Array<{
+      chainId: string;
+      deviceUuid: UUID;
+      safeAddress: `0x${string}`;
+      signerAddress?: `0x${string}` | null;
+    }>;
+  }): Promise<void>;
 
   deleteSubscription(args: {
     deviceUuid: UUID;

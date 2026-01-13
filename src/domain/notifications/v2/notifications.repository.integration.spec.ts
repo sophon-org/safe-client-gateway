@@ -20,6 +20,9 @@ import { NotificationType as NotificationTypeEnum } from '@/domain/notifications
 import { DatabaseMigrator } from '@/datasources/db/v2/database-migrator.service';
 import type { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
+import { CacheRouter } from '@/datasources/cache/cache.router';
+import { getAddress } from 'viem';
+import { deleteAllSubscriptionsDtoBuilder } from '@/domain/notifications/v2/entities/__tests__/delete-all-subscriptions.dto.builder';
 
 describe('NotificationsRepositoryV2', () => {
   const mockLoggingService = {
@@ -39,17 +42,48 @@ describe('NotificationsRepositoryV2', () => {
       if (key === 'db.migrator.retryAfterMs') {
         return config.db.migrator.retryAfterMs;
       }
+      if (key === 'db.orm.cache.socket.host') {
+        return config.redis.host;
+      }
+      if (key === 'db.orm.cache.socket.port') {
+        return config.redis.port;
+      }
+      if (key === 'pushNotifications.getSubscribersBySafeTtlMilliseconds') {
+        return faker.number.int({
+          min: 10000,
+          max: 70000,
+        });
+      }
     }),
   } as jest.MockedObjectDeep<ConfigService>;
-
   const config = configuration();
   const testDatabaseName = faker.string.alpha({ length: 10, casing: 'lower' });
+  const QUERY_CACHE_DURATION = mockConfigService.getOrThrow(
+    'pushNotifications.getSubscribersBySafeTtlMilliseconds',
+  );
   const dataSource = new DataSource({
     ...postgresConfig({
       ...config.db.connection.postgres,
       type: 'postgres',
       database: testDatabaseName,
     }),
+    cache: {
+      type: 'redis',
+      options: {
+        socket: {
+          host: config.redis.host,
+          port: config.redis.port,
+        },
+        password: config.redis.pass,
+        username: config.redis.user,
+      },
+      duration: QUERY_CACHE_DURATION,
+      /**
+       * @todo Fix the underlying issue with the Redis client shutting down
+       */
+      ignoreErrors: true,
+    },
+    synchronize: true,
     migrationsTableName: config.db.orm.migrationsTableName,
     entities: [
       NotificationType,
@@ -182,6 +216,7 @@ describe('NotificationsRepositoryV2', () => {
       mockPushNotificationsApi,
       mockLoggingService,
       postgresDatabaseService,
+      mockConfigService,
     );
   });
 
@@ -217,6 +252,148 @@ describe('NotificationsRepositoryV2', () => {
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(device).toHaveProperty('device_uuid');
       expect(device?.device_uuid).toBe(upsertSubscriptionsDto.deviceUuid);
+    });
+
+    it('Should remove subscriptions cache when upserting a subscription', async () => {
+      jest.spyOn(dataSource, 'transaction');
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+      const cacheKeys: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+      const cacheResult: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult.push(result.identifier);
+        }
+      }
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+      const cacheResultNew: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResultNew.push(result.identifier);
+        }
+      }
+
+      expect(cacheResult).toHaveLength(upsertSubscriptionsDto.safes.length);
+      expect(cacheResultNew).toHaveLength(0);
+    });
+
+    it('Should not remove other devices subscriptions cache when upserting a new subscription', async () => {
+      jest.spyOn(dataSource, 'transaction');
+      const authPayloadDto_1 = authPayloadDtoBuilder().build();
+      const authPayloadDto_2 = authPayloadDtoBuilder().build();
+      const authPayload_1 = new AuthPayload(authPayloadDto_1);
+      const upsertSubscriptionsDto_1 = upsertSubscriptionsDtoBuilder().build();
+      const authPayload_2 = new AuthPayload(authPayloadDto_2);
+      const upsertSubscriptionsDto_2 = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload_1,
+        upsertSubscriptionsDto: upsertSubscriptionsDto_1,
+      });
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload_2,
+        upsertSubscriptionsDto: upsertSubscriptionsDto_2,
+      });
+
+      const cacheKeys_1: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto_1.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys_1.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+      const cacheKeys_2: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto_2.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys_2.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+
+      const cacheResult_1_old: Array<string> = [];
+      for (const cacheKey of cacheKeys_1) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult_1_old.push(result.identifier);
+        }
+      }
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload_1,
+        upsertSubscriptionsDto: upsertSubscriptionsDto_1,
+      });
+      const cacheResult_1_new: Array<string> = [];
+      for (const cacheKey of cacheKeys_1) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult_1_new.push(result.identifier);
+        }
+      }
+
+      const cacheResult_2: Array<string> = [];
+      for (const cacheKey of cacheKeys_2) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult_2.push(result.identifier);
+        }
+      }
+
+      expect(cacheResult_1_old).toHaveLength(
+        upsertSubscriptionsDto_1.safes.length,
+      );
+      expect(cacheResult_1_new).toHaveLength(0);
+      expect(cacheResult_2).toHaveLength(upsertSubscriptionsDto_2.safes.length);
     });
 
     it('Should deletePreviousSubscriptions() when upserting a subscription', async () => {
@@ -485,6 +662,41 @@ describe('NotificationsRepositoryV2', () => {
       expect(secondSafeSubscription).toHaveProperty('subscriber');
     });
 
+    it('Should cache safe subscribers successfully', async () => {
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const secondAuthPayloadDto = authPayloadDtoBuilder().build();
+      const secondAuthPayload = new AuthPayload(secondAuthPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: secondAuthPayload,
+        upsertSubscriptionsDto,
+      });
+
+      await notificationsRepositoryService.getSubscribersBySafe({
+        chainId: upsertSubscriptionsDto.safes[0].chainId,
+        safeAddress: upsertSubscriptionsDto.safes[0].address,
+      });
+
+      const cacheKey = CacheRouter.getOrnCacheKey(
+        'getSubscribersBySafe',
+        upsertSubscriptionsDto.safes[0].chainId,
+        upsertSubscriptionsDto.safes[0].address,
+      );
+
+      const cacheResult = await dataSource.queryResultCache?.getFromCache({
+        identifier: cacheKey,
+        duration: QUERY_CACHE_DURATION,
+      });
+
+      expect(cacheResult?.identifier).toBeTruthy();
+    });
+
     it('Should return an empty array if no subscriber exists', async () => {
       const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
 
@@ -535,6 +747,64 @@ describe('NotificationsRepositoryV2', () => {
 
       expect(subscriptionBeforeRemoval).toHaveLength(1);
       expect(subscriptionAfterRemoval).toHaveLength(0);
+    });
+
+    it('Should remove cache when deleting a subscription', async () => {
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const cacheKeys: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+
+      const cacheResult: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult.push(result.identifier);
+        }
+      }
+
+      for (const safe of upsertSubscriptionsDto.safes) {
+        await notificationsRepositoryService.deleteSubscription({
+          deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+
+      const cacheResultAfterRemoval: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResultAfterRemoval.push(result.identifier);
+        }
+      }
+
+      expect(cacheResult).toHaveLength(upsertSubscriptionsDto.safes.length);
+      expect(cacheResultAfterRemoval).toHaveLength(0);
     });
 
     it('Should throw NotFoundException if a subscription does not exist', async () => {
@@ -661,6 +931,501 @@ describe('NotificationsRepositoryV2', () => {
 
       expect(device).toHaveLength(0);
       expect(subscription).toHaveLength(0);
+    });
+
+    it('Should remove device subscriptions cache when deleting a device', async () => {
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const cacheKeys: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+
+      const cacheResult: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult.push(result.identifier);
+        }
+      }
+
+      await notificationsRepositoryService.deleteDevice(
+        upsertSubscriptionsDto.deviceUuid as UUID,
+      );
+
+      const cacheResultAfterRemoval: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResultAfterRemoval.push(result.identifier);
+        }
+      }
+
+      expect(cacheResult).toHaveLength(upsertSubscriptionsDto.safes.length);
+      expect(cacheResultAfterRemoval).toHaveLength(0);
+    });
+  });
+
+  describe('deleteAllSubscriptions()', () => {
+    it('Should delete all subscriptions successfully', async () => {
+      const authPayloadDto1 = authPayloadDtoBuilder().build();
+      const authPayload1 = new AuthPayload(authPayloadDto1);
+      const upsertSubscriptionsDto1 = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload1,
+        upsertSubscriptionsDto: upsertSubscriptionsDto1,
+      });
+
+      const authPayloadDto2 = authPayloadDtoBuilder().build();
+      const authPayload2 = new AuthPayload(authPayloadDto2);
+      const upsertSubscriptionsDto2 = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload2,
+        upsertSubscriptionsDto: upsertSubscriptionsDto2,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      const subscriptionsBeforeDeletion =
+        await notificationSubscriptionRepository.find();
+
+      const deleteAllSubscriptionsDto = [
+        {
+          chainId: upsertSubscriptionsDto1.safes[0].chainId,
+          deviceUuid: upsertSubscriptionsDto1.deviceUuid as UUID,
+          safeAddress: upsertSubscriptionsDto1.safes[0].address,
+        },
+        {
+          chainId: upsertSubscriptionsDto2.safes[0].chainId,
+          deviceUuid: upsertSubscriptionsDto2.deviceUuid as UUID,
+          safeAddress: upsertSubscriptionsDto2.safes[0].address,
+        },
+      ];
+
+      await notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      const remainingSubscriptions =
+        await notificationSubscriptionRepository.find({
+          where: [
+            {
+              chain_id: upsertSubscriptionsDto1.safes[0].chainId,
+              safe_address: upsertSubscriptionsDto1.safes[0].address,
+              push_notification_device: {
+                device_uuid: upsertSubscriptionsDto1.deviceUuid as UUID,
+              },
+            },
+            {
+              chain_id: upsertSubscriptionsDto2.safes[0].chainId,
+              safe_address: upsertSubscriptionsDto2.safes[0].address,
+              push_notification_device: {
+                device_uuid: upsertSubscriptionsDto2.deviceUuid as UUID,
+              },
+            },
+          ],
+        });
+
+      expect(subscriptionsBeforeDeletion.length).toBeGreaterThan(0);
+      expect(remainingSubscriptions).toHaveLength(0);
+    });
+
+    it('Should throw NotFoundException if no subscriptions are found', async () => {
+      const deleteAllSubscriptionsDto = [
+        {
+          chainId: faker.string.numeric(),
+          deviceUuid: faker.string.uuid() as UUID,
+          safeAddress: getAddress(faker.finance.ethereumAddress()),
+        },
+      ];
+
+      const result = notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      await expect(result).rejects.toThrow(
+        new NotFoundException('No Subscription Found!'),
+      );
+    });
+
+    it('Should clear cache for all deleted subscriptions', async () => {
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const cacheKeys: Array<string> = [];
+      for (const safe of upsertSubscriptionsDto.safes) {
+        const cacheKey = CacheRouter.getOrnCacheKey(
+          'getSubscribersBySafe',
+          safe.chainId,
+          safe.address,
+        );
+        cacheKeys.push(cacheKey);
+        await notificationsRepositoryService.getSubscribersBySafe({
+          chainId: safe.chainId,
+          safeAddress: safe.address,
+        });
+      }
+
+      const cacheResult: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResult.push(result.identifier);
+        }
+      }
+
+      const deleteAllSubscriptionsDto = upsertSubscriptionsDto.safes.map(
+        (safe) => ({
+          chainId: safe.chainId,
+          deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+          safeAddress: safe.address,
+        }),
+      );
+
+      await notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      const cacheResultAfterDeletion: Array<string> = [];
+      for (const cacheKey of cacheKeys) {
+        const result = await dataSource.queryResultCache?.getFromCache({
+          identifier: cacheKey,
+          duration: QUERY_CACHE_DURATION,
+        });
+        if (result?.identifier) {
+          cacheResultAfterDeletion.push(result.identifier);
+        }
+      }
+
+      expect(cacheResult).toHaveLength(upsertSubscriptionsDto.safes.length);
+      expect(cacheResultAfterDeletion).toHaveLength(0);
+    });
+
+    it('Should only delete matching subscriptions', async () => {
+      const authPayloadDto1 = authPayloadDtoBuilder().build();
+      const authPayload1 = new AuthPayload(authPayloadDto1);
+      const upsertSubscriptionsDto1 = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload1,
+        upsertSubscriptionsDto: upsertSubscriptionsDto1,
+      });
+
+      const authPayloadDto2 = authPayloadDtoBuilder().build();
+      const authPayload2 = new AuthPayload(authPayloadDto2);
+      const upsertSubscriptionsDto2 = upsertSubscriptionsDtoBuilder().build();
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload: authPayload2,
+        upsertSubscriptionsDto: upsertSubscriptionsDto2,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      const deleteAllSubscriptionsDto = [
+        {
+          chainId: upsertSubscriptionsDto1.safes[0].chainId,
+          deviceUuid: upsertSubscriptionsDto1.deviceUuid as UUID,
+          safeAddress: upsertSubscriptionsDto1.safes[0].address,
+        },
+      ];
+
+      await notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      const firstSubscription = await notificationSubscriptionRepository.find({
+        where: {
+          chain_id: upsertSubscriptionsDto1.safes[0].chainId,
+          safe_address: upsertSubscriptionsDto1.safes[0].address,
+          push_notification_device: {
+            device_uuid: upsertSubscriptionsDto1.deviceUuid as UUID,
+          },
+        },
+      });
+
+      const secondSubscription = await notificationSubscriptionRepository.find({
+        where: {
+          chain_id: upsertSubscriptionsDto2.safes[0].chainId,
+          safe_address: upsertSubscriptionsDto2.safes[0].address,
+          push_notification_device: {
+            device_uuid: upsertSubscriptionsDto2.deviceUuid as UUID,
+          },
+        },
+      });
+
+      expect(firstSubscription).toHaveLength(0);
+      expect(secondSubscription).toHaveLength(1);
+    });
+
+    it('Should delete subscriptions with specific signerAddress when provided', async () => {
+      const signerAddress = getAddress(faker.finance.ethereumAddress());
+      const authPayloadDto = authPayloadDtoBuilder()
+        .with('signer_address', signerAddress)
+        .build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      const deleteAllSubscriptionsDto = deleteAllSubscriptionsDtoBuilder()
+        .with('subscriptions', [
+          {
+            chainId: upsertSubscriptionsDto.safes[0].chainId,
+            deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            safeAddress: upsertSubscriptionsDto.safes[0].address,
+            signerAddress,
+          },
+        ])
+        .build().subscriptions;
+
+      await notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      const remainingSubscriptions =
+        await notificationSubscriptionRepository.find({
+          where: {
+            chain_id: upsertSubscriptionsDto.safes[0].chainId,
+            safe_address: upsertSubscriptionsDto.safes[0].address,
+            push_notification_device: {
+              device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            },
+            signer_address: signerAddress,
+          },
+        });
+
+      expect(remainingSubscriptions).toHaveLength(0);
+    });
+
+    it('Should not delete subscriptions with different signerAddress when signerAddress is specified', async () => {
+      const signerAddress1 = getAddress(faker.finance.ethereumAddress());
+      const signerAddress2 = getAddress(faker.finance.ethereumAddress());
+      const authPayloadDto = authPayloadDtoBuilder().build();
+      const authPayload = new AuthPayload(authPayloadDto);
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      // Manually update a subscription to have signerAddress1
+      const subscriptions = await notificationSubscriptionRepository.find({
+        where: {
+          chain_id: upsertSubscriptionsDto.safes[0].chainId,
+          safe_address: upsertSubscriptionsDto.safes[0].address,
+          push_notification_device: {
+            device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+          },
+        },
+      });
+
+      expect(subscriptions).toHaveLength(1);
+
+      // Update the subscription to have signerAddress1
+      await notificationSubscriptionRepository.update(subscriptions[0].id, {
+        signer_address: signerAddress1,
+      });
+
+      const deleteAllSubscriptionsDto = deleteAllSubscriptionsDtoBuilder()
+        .with('subscriptions', [
+          {
+            chainId: upsertSubscriptionsDto.safes[0].chainId,
+            deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            safeAddress: upsertSubscriptionsDto.safes[0].address,
+            signerAddress: signerAddress2, // Different signer address
+          },
+        ])
+        .build().subscriptions;
+
+      const result = notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      // Should throw NotFoundException since no subscription matches the different signerAddress
+      await expect(result).rejects.toThrow(
+        new NotFoundException('No Subscription Found!'),
+      );
+
+      // The subscription with signerAddress1 should still exist
+      const remainingSubscriptions =
+        await notificationSubscriptionRepository.find({
+          where: {
+            chain_id: upsertSubscriptionsDto.safes[0].chainId,
+            safe_address: upsertSubscriptionsDto.safes[0].address,
+            push_notification_device: {
+              device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            },
+            signer_address: signerAddress1,
+          },
+        });
+
+      expect(remainingSubscriptions).toHaveLength(1);
+    });
+
+    it('Should delete subscriptions with null signerAddress when explicitly set to null', async () => {
+      const authPayload = new AuthPayload();
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      // Find and update a subscription to have null signerAddress
+      const subscriptions = await notificationSubscriptionRepository.find({
+        where: {
+          chain_id: upsertSubscriptionsDto.safes[0].chainId,
+          safe_address: upsertSubscriptionsDto.safes[0].address,
+          push_notification_device: {
+            device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+          },
+        },
+      });
+
+      expect(subscriptions).toHaveLength(1);
+
+      // Ensure the subscription has null signerAddress (it should by default)
+      expect(subscriptions[0].signer_address).toBe(null);
+
+      const deleteAllSubscriptionsDto = deleteAllSubscriptionsDtoBuilder()
+        .with('subscriptions', [
+          {
+            chainId: upsertSubscriptionsDto.safes[0].chainId,
+            deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            safeAddress: upsertSubscriptionsDto.safes[0].address,
+            signerAddress: null, // Explicitly set to null
+          },
+        ])
+        .build().subscriptions;
+
+      await notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      const remainingSubscriptions =
+        await notificationSubscriptionRepository.find({
+          where: {
+            chain_id: upsertSubscriptionsDto.safes[0].chainId,
+            safe_address: upsertSubscriptionsDto.safes[0].address,
+            push_notification_device: {
+              device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            },
+          },
+        });
+
+      expect(remainingSubscriptions).toHaveLength(0);
+    });
+
+    it('Should not delete subscriptions with null signerAddress when filtering by specific address', async () => {
+      const specificSignerAddress = getAddress(faker.finance.ethereumAddress());
+      const authPayload = new AuthPayload();
+      const upsertSubscriptionsDto = upsertSubscriptionsDtoBuilder().build();
+
+      await notificationsRepositoryService.upsertSubscriptions({
+        authPayload,
+        upsertSubscriptionsDto,
+      });
+
+      const notificationSubscriptionRepository = dataSource.getRepository(
+        NotificationSubscription,
+      );
+
+      // Verify the subscription has null signerAddress
+      const subscriptions = await notificationSubscriptionRepository.find({
+        where: {
+          chain_id: upsertSubscriptionsDto.safes[0].chainId,
+          safe_address: upsertSubscriptionsDto.safes[0].address,
+          push_notification_device: {
+            device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+          },
+        },
+      });
+
+      expect(subscriptions).toHaveLength(1);
+      expect(subscriptions[0].signer_address).toBe(null);
+
+      const deleteAllSubscriptionsDto = deleteAllSubscriptionsDtoBuilder()
+        .with('subscriptions', [
+          {
+            chainId: upsertSubscriptionsDto.safes[0].chainId,
+            deviceUuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            safeAddress: upsertSubscriptionsDto.safes[0].address,
+            signerAddress: specificSignerAddress, // Specific address, not null
+          },
+        ])
+        .build().subscriptions;
+
+      const result = notificationsRepositoryService.deleteAllSubscriptions({
+        subscriptions: deleteAllSubscriptionsDto,
+      });
+
+      // Should throw NotFoundException since subscription has null signer_address, not the specific address
+      await expect(result).rejects.toThrow(
+        new NotFoundException('No Subscription Found!'),
+      );
+
+      // The subscription with null signerAddress should still exist
+      const remainingSubscriptions =
+        await notificationSubscriptionRepository.find({
+          where: {
+            chain_id: upsertSubscriptionsDto.safes[0].chainId,
+            safe_address: upsertSubscriptionsDto.safes[0].address,
+            push_notification_device: {
+              device_uuid: upsertSubscriptionsDto.deviceUuid as UUID,
+            },
+          },
+        });
+
+      expect(remainingSubscriptions).toHaveLength(1);
+      expect(remainingSubscriptions[0].signer_address).toBe(null);
     });
   });
 });

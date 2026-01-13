@@ -8,6 +8,7 @@ import { NetworkResponseError } from '@/datasources/network/entities/network.err
 import type { INetworkService } from '@/datasources/network/network.service.interface';
 import type { Backbone } from '@/domain/backbone/entities/backbone.entity';
 import type { Singleton } from '@/domain/chains/entities/singleton.entity';
+import { LogType } from '@/domain/common/entities/log-type.entity';
 import type { Contract } from '@/domain/contracts/entities/contract.entity';
 import type { DataDecoded } from '@/domain/data-decoder/v1/entities/data-decoded.entity';
 import type { Delegate } from '@/domain/delegate/entities/delegate.entity';
@@ -17,7 +18,6 @@ import type { GetEstimationDto } from '@/domain/estimations/entities/get-estimat
 import type { IndexingStatus } from '@/domain/indexing/entities/indexing-status.entity';
 import type { ITransactionApi } from '@/domain/interfaces/transaction-api.interface';
 import type { Message } from '@/domain/messages/entities/message.entity';
-import type { Device } from '@/domain/notifications/v1/entities/device.entity';
 import type { CreationTransaction } from '@/domain/safe/entities/creation-transaction.entity';
 import type { ModuleTransaction } from '@/domain/safe/entities/module-transaction.entity';
 import type { MultisigTransaction } from '@/domain/safe/entities/multisig-transaction.entity';
@@ -34,7 +34,10 @@ import get from 'lodash/get';
 
 export class TransactionApi implements ITransactionApi {
   private static readonly ERROR_ARRAY_PATH = 'nonFieldErrors';
-  private static readonly HOLESKY_CHAIN_ID = '17000';
+  private static readonly HOODI_CHAIN_ID = '560048';
+
+  // TODO: Remove after Vault decoding has been released
+  private static readonly BASE_CHAIN_ID = '8453';
 
   private readonly defaultExpirationTimeInSeconds: number;
   private readonly indexingExpirationTimeInSeconds: number;
@@ -58,17 +61,23 @@ export class TransactionApi implements ITransactionApi {
         'expirationTimeInSeconds.indexing',
       );
 
-    // TODO: Remove temporary cache times for Holesky chain.
-    if (chainId === TransactionApi.HOLESKY_CHAIN_ID) {
-      const holeskyExpirationTime =
-        this.configurationService.getOrThrow<number>(
-          'expirationTimeInSeconds.holesky',
-        );
-      this.defaultExpirationTimeInSeconds = holeskyExpirationTime;
-      this.defaultNotFoundExpirationTimeSeconds = holeskyExpirationTime;
-      this.tokenNotFoundExpirationTimeSeconds = holeskyExpirationTime;
-      this.contractNotFoundExpirationTimeSeconds = holeskyExpirationTime;
-      this.ownersExpirationTimeSeconds = holeskyExpirationTime;
+    const isProduction = this.configurationService.getOrThrow<boolean>(
+      'application.isProduction',
+    );
+    // TODO: Remove temporary cache times for Hoodi chain.
+    if (
+      chainId === TransactionApi.HOODI_CHAIN_ID ||
+      // TODO: Remove after Vault decoding has been released
+      (!isProduction && chainId === TransactionApi.BASE_CHAIN_ID)
+    ) {
+      const hoodiExpirationTime = this.configurationService.getOrThrow<number>(
+        'expirationTimeInSeconds.hoodi',
+      );
+      this.defaultExpirationTimeInSeconds = hoodiExpirationTime;
+      this.defaultNotFoundExpirationTimeSeconds = hoodiExpirationTime;
+      this.tokenNotFoundExpirationTimeSeconds = hoodiExpirationTime;
+      this.contractNotFoundExpirationTimeSeconds = hoodiExpirationTime;
+      this.ownersExpirationTimeSeconds = hoodiExpirationTime;
     } else {
       this.defaultExpirationTimeInSeconds =
         this.configurationService.getOrThrow<number>(
@@ -200,14 +209,14 @@ export class TransactionApi implements ITransactionApi {
 
     if (cached != null) {
       this.loggingService.debug({
-        type: 'cache_hit',
+        type: LogType.CacheHit,
         ...cacheDir,
       });
 
       return cached === 'true';
     } else {
       this.loggingService.debug({
-        type: 'cache_miss',
+        type: LogType.CacheMiss,
         ...cacheDir,
       });
     }
@@ -264,6 +273,35 @@ export class TransactionApi implements ITransactionApi {
         url,
         notFoundExpireTimeSeconds: this.contractNotFoundExpirationTimeSeconds,
         expireTimeSeconds: this.defaultExpirationTimeInSeconds,
+      });
+    } catch (error) {
+      throw this.httpErrorFactory.from(this.mapError(error));
+    }
+  }
+
+  // Important: there is no hook which invalidates this endpoint,
+  // Therefore, this data will live in cache until [defaultExpirationTimeInSeconds]
+  async getTrustedForDelegateCallContracts(args: {
+    limit?: number;
+    offset?: number;
+  }): Promise<Raw<Page<Contract>>> {
+    try {
+      const cacheDir = CacheRouter.getTrustedForDelegateCallContractsCacheDir(
+        this.chainId,
+      );
+      const url = `${this.baseUrl}/api/v1/contracts/`;
+      return await this.dataSource.get<Page<Contract>>({
+        cacheDir,
+        url,
+        notFoundExpireTimeSeconds: this.defaultNotFoundExpirationTimeSeconds,
+        expireTimeSeconds: this.defaultExpirationTimeInSeconds,
+        networkRequest: {
+          params: {
+            trusted_for_delegate_call: true,
+            limit: args.limit,
+            offset: args.offset,
+          },
+        },
       });
     } catch (error) {
       throw this.httpErrorFactory.from(this.mapError(error));
@@ -572,7 +610,7 @@ export class TransactionApi implements ITransactionApi {
       return await this.networkService.post({
         url,
         data: {
-          signature: args.addConfirmationDto.signedSafeTxHash,
+          signature: args.addConfirmationDto.signature,
         },
       });
     } catch (error) {
@@ -701,6 +739,55 @@ export class TransactionApi implements ITransactionApi {
     }
   }
 
+  async getMultisigTransactionsWithNoCache({
+    safeAddress,
+    ...params
+  }: {
+    safeAddress: `0x${string}`;
+    // Transaction Service parameters
+    failed?: boolean;
+    modified__lt?: string;
+    modified__gt?: string;
+    modified__lte?: string;
+    modified__gte?: string;
+    nonce__lt?: number;
+    nonce__gt?: number;
+    nonce__lte?: number;
+    nonce__gte?: number;
+    nonce?: number;
+    safe_tx_hash?: string;
+    to?: string;
+    value__lt?: number;
+    value__gt?: number;
+    value?: number;
+    executed?: boolean;
+    has_confirmations?: boolean;
+    trusted?: boolean;
+    execution_date__gte?: string;
+    execution_date__lte?: string;
+    submission_date__gte?: string;
+    submission_date__lte?: string;
+    transaction_hash?: string;
+    ordering?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<Raw<Page<MultisigTransaction>>> {
+    try {
+      const url = `${this.baseUrl}/api/v1/safes/${safeAddress}/multisig-transactions/`;
+      const { data } = await this.networkService.get<Page<MultisigTransaction>>(
+        {
+          url,
+          networkRequest: {
+            params,
+          },
+        },
+      );
+      return data;
+    } catch (error) {
+      throw this.httpErrorFactory.from(this.mapError(error));
+    }
+  }
+
   async clearMultisigTransactions(safeAddress: `0x${string}`): Promise<void> {
     const key = CacheRouter.getMultisigTransactionsCacheKey({
       chainId: this.chainId,
@@ -724,6 +811,20 @@ export class TransactionApi implements ITransactionApi {
         notFoundExpireTimeSeconds: this.defaultNotFoundExpirationTimeSeconds,
         expireTimeSeconds: this.defaultExpirationTimeInSeconds,
       });
+    } catch (error) {
+      throw this.httpErrorFactory.from(this.mapError(error));
+    }
+  }
+
+  async getMultisigTransactionWithNoCache(
+    safeTransactionHash: string,
+  ): Promise<Raw<MultisigTransaction>> {
+    try {
+      const url = `${this.baseUrl}/api/v1/multisig-transactions/${safeTransactionHash}/`;
+      const { data } = await this.networkService.get<Raw<MultisigTransaction>>({
+        url,
+      });
+      return data;
     } catch (error) {
       throw this.httpErrorFactory.from(this.mapError(error));
     }
@@ -771,6 +872,20 @@ export class TransactionApi implements ITransactionApi {
         notFoundExpireTimeSeconds: this.defaultNotFoundExpirationTimeSeconds,
         expireTimeSeconds: this.defaultExpirationTimeInSeconds,
       });
+    } catch (error) {
+      throw this.httpErrorFactory.from(this.mapError(error));
+    }
+  }
+
+  async getCreationTransactionWithNoCache(
+    safeAddress: `0x${string}`,
+  ): Promise<Raw<CreationTransaction>> {
+    try {
+      const url = `${this.baseUrl}/api/v1/safes/${safeAddress}/creation/`;
+      const { data } = await this.networkService.get({
+        url,
+      });
+      return data;
     } catch (error) {
       throw this.httpErrorFactory.from(this.mapError(error));
     }
@@ -883,53 +998,6 @@ export class TransactionApi implements ITransactionApi {
         notFoundExpireTimeSeconds: this.defaultNotFoundExpirationTimeSeconds,
         expireTimeSeconds: this.ownersExpirationTimeSeconds,
       });
-    } catch (error) {
-      throw this.httpErrorFactory.from(this.mapError(error));
-    }
-  }
-
-  async postDeviceRegistration(args: {
-    device: Device;
-    safes: Array<string>;
-    signatures: Array<string>;
-  }): Promise<void> {
-    try {
-      const url = `${this.baseUrl}/api/v1/notifications/devices/`;
-      await this.networkService.post({
-        url,
-        data: {
-          uuid: args.device.uuid,
-          cloudMessagingToken: args.device.cloudMessagingToken,
-          buildNumber: args.device.buildNumber,
-          bundle: args.device.bundle,
-          deviceType: args.device.deviceType,
-          version: args.device.version,
-          timestamp: args.device.timestamp,
-          safes: args.safes,
-          signatures: args.signatures,
-        },
-      });
-    } catch (error) {
-      throw this.httpErrorFactory.from(this.mapError(error));
-    }
-  }
-
-  async deleteDeviceRegistration(uuid: string): Promise<void> {
-    try {
-      const url = `${this.baseUrl}/api/v1/notifications/devices/${uuid}`;
-      await this.networkService.delete({ url });
-    } catch (error) {
-      throw this.httpErrorFactory.from(this.mapError(error));
-    }
-  }
-
-  async deleteSafeRegistration(args: {
-    uuid: string;
-    safeAddress: `0x${string}`;
-  }): Promise<void> {
-    try {
-      const url = `${this.baseUrl}/api/v1/notifications/devices/${args.uuid}/safes/${args.safeAddress}`;
-      await this.networkService.delete({ url });
     } catch (error) {
       throw this.httpErrorFactory.from(this.mapError(error));
     }

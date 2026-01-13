@@ -7,7 +7,7 @@ import {
   PooledStakingStats,
   PooledStakingStatsSchema,
 } from '@/datasources/staking-api/entities/pooled-staking-stats.entity';
-import { IStakingRepository } from '@/domain/staking/staking.repository.interface';
+import { IStakingRepositoryWithRewardsFee } from '@/domain/staking/staking.repository.interface';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   DedicatedStakingStats,
@@ -29,9 +29,23 @@ import {
   TransactionStatus,
   TransactionStatusSchema,
 } from '@/datasources/staking-api/entities/transaction-status.entity';
+import {
+  DefiVaultStake,
+  DefiVaultStakesSchema,
+} from '@/datasources/staking-api/entities/defi-vault-stake.entity';
+import {
+  DefiMorphoExtraReward,
+  DefiMorphoExtraRewardsSchema,
+} from '@/datasources/staking-api/entities/defi-morpho-extra-reward.entity';
+import {
+  RewardsFee,
+  RewardsFeeSchema,
+} from '@/datasources/staking-api/entities/rewards-fee.entity';
+
+// TODO: Deduplicate code with EarnRepository
 
 @Injectable()
-export class StakingRepository implements IStakingRepository {
+export class StakingRepository implements IStakingRepositoryWithRewardsFee {
   constructor(
     @Inject(IStakingApiManager)
     private readonly stakingApiFactory: IStakingApiManager,
@@ -54,9 +68,19 @@ export class StakingRepository implements IStakingRepository {
     return deployment;
   }
 
+  public async getRewardsFee(args: {
+    chainId: string;
+    address: `0x${string}`;
+  }): Promise<RewardsFee> {
+    const stakingApi = await this.stakingApiFactory.getApi(args.chainId);
+    const rewardsFee = await stakingApi.getRewardsFee(args.address);
+    return RewardsFeeSchema.parse(rewardsFee);
+  }
+
   private async getDeployments(chainId: string): Promise<Array<Deployment>> {
     const stakingApi = await this.stakingApiFactory.getApi(chainId);
     const deployments = await stakingApi.getDeployments();
+    // TODO: Filter response by chainId and remove logic from validateDeployment
     return DeploymentsSchema.parse(deployments);
   }
 
@@ -91,6 +115,28 @@ export class StakingRepository implements IStakingRepository {
     const defiStats = await stakingApi.getDefiVaultStats(args.vault);
     // Cannot be >1 contract deployed at the same address so return first element
     return DefiVaultsStateSchema.parse(defiStats)[0];
+  }
+
+  public async getDefiVaultStake(args: {
+    chainId: string;
+    safeAddress: `0x${string}`;
+    vault: `0x${string}`;
+  }): Promise<DefiVaultStake> {
+    const stakingApi = await this.stakingApiFactory.getApi(args.chainId);
+    const defiStakes = await stakingApi.getDefiVaultStakes(args);
+    // Safe can only have one stake per Vault so return first element
+    return DefiVaultStakesSchema.parse(defiStakes)[0];
+  }
+
+  public async getDefiMorphoExtraRewards(args: {
+    chainId: string;
+    safeAddress: `0x${string}`;
+  }): Promise<Array<DefiMorphoExtraReward>> {
+    const stakingApi = await this.stakingApiFactory.getApi(args.chainId);
+    const defiMorphoExtraRewards = await stakingApi.getDefiMorphoExtraRewards(
+      args.safeAddress,
+    );
+    return DefiMorphoExtraRewardsSchema.parse(defiMorphoExtraRewards);
   }
 
   public async getStakes(args: {

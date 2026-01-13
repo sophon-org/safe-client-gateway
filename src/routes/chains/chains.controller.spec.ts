@@ -1,17 +1,9 @@
 import { faker } from '@faker-js/faker';
 import type { INestApplication } from '@nestjs/common';
-import type { TestingModule } from '@nestjs/testing';
-import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppProvider } from '@/__tests__/test-app.provider';
-import { AppModule } from '@/app.module';
 import { IConfigurationService } from '@/config/configuration.service.interface';
-import configuration from '@/config/entities/__tests__/configuration';
-import { TestCacheModule } from '@/datasources/cache/__tests__/test.cache.module';
-import { CacheModule } from '@/datasources/cache/cache.module';
-import { TestNetworkModule } from '@/datasources/network/__tests__/test.network.module';
 import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
-import { NetworkModule } from '@/datasources/network/network.module';
 import type { INetworkService } from '@/datasources/network/network.service.interface';
 import { NetworkService } from '@/datasources/network/network.service.interface';
 import { backboneBuilder } from '@/domain/backbone/entities/__tests__/backbone.builder';
@@ -22,23 +14,14 @@ import type { Chain } from '@/domain/chains/entities/chain.entity';
 import type { Singleton } from '@/domain/chains/entities/singleton.entity';
 import type { MasterCopy } from '@/routes/chains/entities/master-copy.entity';
 import type { Page } from '@/domain/entities/page.entity';
-import { TestLoggingModule } from '@/logging/__tests__/test.logging.module';
-import { RequestScopedLoggingModule } from '@/logging/logging.module';
 import { PaginationData } from '@/routes/common/pagination/pagination.data';
 import { getAddress } from 'viem';
-import { TestQueuesApiModule } from '@/datasources/queues/__tests__/test.queues-api.module';
-import { QueuesApiModule } from '@/datasources/queues/queues-api.module';
 import type { Server } from 'net';
 import { indexingStatusBuilder } from '@/domain/chains/entities/__tests__/indexing-status.builder';
 import { BlockchainApiManagerModule } from '@/domain/interfaces/blockchain-api.manager.interface';
 import { TestBlockchainApiManagerModule } from '@/datasources/blockchain/__tests__/test.blockchain-api.manager';
-import { PostgresDatabaseModuleV2 } from '@/datasources/db/v2/postgres-database.module';
-import { TestPostgresDatabaseModuleV2 } from '@/datasources/db/v2/test.postgres-database.module';
-import { PostgresDatabaseModule } from '@/datasources/db/v1/postgres-database.module';
-import { TestPostgresDatabaseModule } from '@/datasources/db/__tests__/test.postgres-database.module';
-import { TestTargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/__tests__/test.targeted-messaging.datasource.module';
-import { TargetedMessagingDatasourceModule } from '@/datasources/targeted-messaging/targeted-messaging.datasource.module';
 import { rawify } from '@/validation/entities/raw.entity';
+import { createTestModule } from '@/__tests__/testing-module';
 
 describe('Chains Controller (Unit)', () => {
   let app: INestApplication<Server>;
@@ -62,26 +45,14 @@ describe('Chains Controller (Unit)', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule.register(configuration)],
-    })
-      .overrideModule(PostgresDatabaseModule)
-      .useModule(TestPostgresDatabaseModule)
-      .overrideModule(TargetedMessagingDatasourceModule)
-      .useModule(TestTargetedMessagingDatasourceModule)
-      .overrideModule(CacheModule)
-      .useModule(TestCacheModule)
-      .overrideModule(RequestScopedLoggingModule)
-      .useModule(TestLoggingModule)
-      .overrideModule(NetworkModule)
-      .useModule(TestNetworkModule)
-      .overrideModule(QueuesApiModule)
-      .useModule(TestQueuesApiModule)
-      .overrideModule(BlockchainApiManagerModule)
-      .useModule(TestBlockchainApiManagerModule)
-      .overrideModule(PostgresDatabaseModuleV2)
-      .useModule(TestPostgresDatabaseModuleV2)
-      .compile();
+    const moduleFixture = await createTestModule({
+      modules: [
+        {
+          originalModule: BlockchainApiManagerModule,
+          testModule: TestBlockchainApiManagerModule,
+        },
+      ],
+    });
 
     const configurationService = moduleFixture.get<IConfigurationService>(
       IConfigurationService,
@@ -118,6 +89,7 @@ describe('Chains Controller (Unit)', () => {
               chainLogoUri: chainsResponse.results[0].chainLogoUri,
               l2: chainsResponse.results[0].l2,
               isTestnet: chainsResponse.results[0].isTestnet,
+              zk: chainsResponse.results[0].zk,
               shortName: chainsResponse.results[0].shortName,
               rpcUri: chainsResponse.results[0].rpcUri,
               safeAppsRpcUri: chainsResponse.results[0].safeAppsRpcUri,
@@ -147,6 +119,7 @@ describe('Chains Controller (Unit)', () => {
               chainLogoUri: chainsResponse.results[1].chainLogoUri,
               l2: chainsResponse.results[1].l2,
               isTestnet: chainsResponse.results[1].isTestnet,
+              zk: chainsResponse.results[1].zk,
               shortName: chainsResponse.results[1].shortName,
               rpcUri: chainsResponse.results[1].rpcUri,
               safeAppsRpcUri: chainsResponse.results[1].safeAppsRpcUri,
@@ -235,6 +208,7 @@ describe('Chains Controller (Unit)', () => {
               chainLogoUri: chainsResponse.results[0].chainLogoUri,
               l2: chainsResponse.results[0].l2,
               isTestnet: chainsResponse.results[0].isTestnet,
+              zk: chainsResponse.results[0].zk,
               shortName: chainsResponse.results[0].shortName,
               rpcUri: chainsResponse.results[0].rpcUri,
               safeAppsRpcUri: chainsResponse.results[0].safeAppsRpcUri,
@@ -264,6 +238,7 @@ describe('Chains Controller (Unit)', () => {
               chainLogoUri: chainsResponse.results[1].chainLogoUri,
               l2: chainsResponse.results[1].l2,
               isTestnet: chainsResponse.results[1].isTestnet,
+              zk: chainsResponse.results[1].zk,
               shortName: chainsResponse.results[1].shortName,
               rpcUri: chainsResponse.results[1].rpcUri,
               safeAppsRpcUri: chainsResponse.results[1].safeAppsRpcUri,
@@ -338,6 +313,7 @@ describe('Chains Controller (Unit)', () => {
         chainLogoUri: chainDomain.chainLogoUri,
         l2: chainDomain.l2,
         isTestnet: chainDomain.isTestnet,
+        zk: chainDomain.zk,
         nativeCurrency: chainDomain.nativeCurrency,
         transactionService: chainDomain.transactionService,
         blockExplorerUriTemplate: chainDomain.blockExplorerUriTemplate,

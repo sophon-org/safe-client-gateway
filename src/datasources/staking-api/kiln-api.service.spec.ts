@@ -6,10 +6,12 @@ import { CacheDir } from '@/datasources/cache/entities/cache-dir.entity';
 import { HttpErrorFactory } from '@/datasources/errors/http-error-factory';
 import { NetworkResponseError } from '@/datasources/network/entities/network.error.entity';
 import { dedicatedStakingStatsBuilder } from '@/datasources/staking-api/entities/__tests__/dedicated-staking-stats.entity.builder';
+import { defiMorphoExtraRewardBuilder } from '@/datasources/staking-api/entities/__tests__/defi-morpho-extra-reward.entity.builder';
 import { defiVaultStatsBuilder } from '@/datasources/staking-api/entities/__tests__/defi-vault-stats.entity.builder';
 import { deploymentBuilder } from '@/datasources/staking-api/entities/__tests__/deployment.entity.builder';
 import { networkStatsBuilder } from '@/datasources/staking-api/entities/__tests__/network-stats.entity.builder';
 import { pooledStakingStatsBuilder } from '@/datasources/staking-api/entities/__tests__/pooled-staking-stats.entity.builder';
+import { rewardsFeeBuilder } from '@/datasources/staking-api/entities/__tests__/rewards-fee.entity.builder';
 import { stakeBuilder } from '@/datasources/staking-api/entities/__tests__/stake.entity.builder';
 import { transactionStatusBuilder } from '@/datasources/staking-api/entities/__tests__/transaction-status.entity.builder';
 import { KilnApi } from '@/datasources/staking-api/kiln-api.service';
@@ -45,6 +47,7 @@ describe('KilnApi', () => {
   let httpErrorFactory: HttpErrorFactory;
   let stakingExpirationTimeInSeconds: number;
   let notFoundExpireTimeSeconds: number;
+  let cacheType: 'earn' | 'staking';
 
   function createTarget(_chainId = faker.string.numeric()): void {
     chainId = _chainId;
@@ -53,6 +56,7 @@ describe('KilnApi', () => {
     httpErrorFactory = new HttpErrorFactory();
     stakingExpirationTimeInSeconds = faker.number.int();
     notFoundExpireTimeSeconds = faker.number.int();
+    cacheType = faker.helpers.arrayElement(['earn', 'staking']);
     mockConfigurationService.getOrThrow.mockImplementation((key) => {
       if (key === 'expirationTimeInSeconds.staking') {
         return stakingExpirationTimeInSeconds;
@@ -71,6 +75,7 @@ describe('KilnApi', () => {
       mockConfigurationService,
       mockCacheService,
       chainId,
+      cacheType,
     );
   }
 
@@ -99,7 +104,7 @@ describe('KilnApi', () => {
       expect(actual).toBe(deployments);
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_deployments', ''),
+        cacheDir: new CacheDir('staking_deployments', cacheType),
         url: `${baseUrl}/v1/deployments`,
         networkRequest: {
           headers: {
@@ -132,11 +137,91 @@ describe('KilnApi', () => {
 
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_deployments', ''),
+        cacheDir: new CacheDir('staking_deployments', cacheType),
         url: `${baseUrl}/v1/deployments`,
         networkRequest: {
           headers: {
             Authorization: `Bearer ${apiKey}`,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+  });
+
+  describe('getRewardsFee', () => {
+    const chainId = faker.string.numeric();
+
+    beforeEach(() => {
+      createTarget(chainId);
+    });
+
+    it('should return rewards fee', async () => {
+      const contract = getAddress(faker.finance.ethereumAddress());
+      const rewardsFee = rewardsFeeBuilder().build();
+      dataSource.get.mockResolvedValue(
+        rawify({
+          status: 200,
+          // Note: Kiln always return { data: T }
+          data: rewardsFee,
+        }),
+      );
+
+      const actual = await target.getRewardsFee(contract);
+
+      expect(actual).toBe(rewardsFee);
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${chainId}_staking_rewards_fee_${contract}`,
+          cacheType,
+        ),
+        url: `${baseUrl}/v1/eth/onchain/v1/fee`,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            integration: contract,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+
+    it('should forward errors', async () => {
+      const contract = getAddress(faker.finance.ethereumAddress());
+      const getRewardsFeeUrl = `${baseUrl}/v1/eth/onchain/v1/fee`;
+      const errorMessage = faker.lorem.sentence();
+      const statusCode = faker.internet.httpStatusCode({
+        types: ['clientError', 'serverError'],
+      });
+      const expected = new DataSourceError(errorMessage, statusCode);
+      dataSource.get.mockRejectedValueOnce(
+        new NetworkResponseError(
+          new URL(getRewardsFeeUrl),
+          {
+            status: statusCode,
+          } as Response,
+          new Error(errorMessage),
+        ),
+      );
+
+      await expect(target.getRewardsFee(contract)).rejects.toThrow(expected);
+
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${chainId}_staking_rewards_fee_${contract}`,
+          cacheType,
+        ),
+        url: getRewardsFeeUrl,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            integration: contract,
           },
         },
         expireTimeSeconds: stakingExpirationTimeInSeconds,
@@ -161,7 +246,7 @@ describe('KilnApi', () => {
       expect(actual).toBe(networkStats);
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_network_stats', ''),
+        cacheDir: new CacheDir('staking_network_stats', cacheType),
         url: `${baseUrl}/v1/eth/network-stats`,
         networkRequest: {
           headers: {
@@ -194,7 +279,7 @@ describe('KilnApi', () => {
 
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_network_stats', ''),
+        cacheDir: new CacheDir('staking_network_stats', cacheType),
         url: `${baseUrl}/v1/eth/network-stats`,
         networkRequest: {
           headers: {
@@ -224,7 +309,7 @@ describe('KilnApi', () => {
 
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_dedicated_staking_stats', ''),
+        cacheDir: new CacheDir('staking_dedicated_staking_stats', cacheType),
         url: `${baseUrl}/v1/eth/kiln-stats`,
         networkRequest: {
           headers: {
@@ -256,7 +341,7 @@ describe('KilnApi', () => {
 
       expect(dataSource.get).toHaveBeenCalledTimes(1);
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
-        cacheDir: new CacheDir('staking_dedicated_staking_stats', ''),
+        cacheDir: new CacheDir('staking_dedicated_staking_stats', cacheType),
         url: getDedicatedStakingStats,
         networkRequest: {
           headers: {
@@ -290,7 +375,7 @@ describe('KilnApi', () => {
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
         cacheDir: new CacheDir(
           `staking_pooled_staking_stats_${pooledStakingStats.address}`,
-          '',
+          cacheType,
         ),
         url: `${baseUrl}/v1/eth/onchain/v2/network-stats`,
         networkRequest: {
@@ -331,7 +416,7 @@ describe('KilnApi', () => {
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
         cacheDir: new CacheDir(
           `staking_pooled_staking_stats_${pooledStakingStats.address}`,
-          '',
+          cacheType,
         ),
         url: `${baseUrl}/v1/eth/onchain/v2/network-stats`,
         networkRequest: {
@@ -382,7 +467,7 @@ describe('KilnApi', () => {
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
         cacheDir: new CacheDir(
           `${defiVaultStats.chain_id.toString()}_staking_defi_vault_stats_${defiVaultStats.vault}`,
-          '',
+          cacheType,
         ),
         url: `${baseUrl}/v1/defi/network-stats`,
         networkRequest: {
@@ -454,7 +539,7 @@ describe('KilnApi', () => {
       expect(dataSource.get).toHaveBeenNthCalledWith(1, {
         cacheDir: new CacheDir(
           `${defiVaultStats.chain_id.toString()}_staking_defi_vault_stats_${defiVaultStats.vault}`,
-          '',
+          cacheType,
         ),
         url: `${baseUrl}/v1/defi/network-stats`,
         networkRequest: {
@@ -463,6 +548,252 @@ describe('KilnApi', () => {
           },
           params: {
             vaults: `${defiVaultStats.chain}_${defiVaultStats.vault}`,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+  });
+
+  describe('getDefiVaultStakes', () => {
+    it('should return the defi vault stakes', async () => {
+      const chainIds = {
+        eth: 1,
+        arb: 42161,
+        bsc: 56,
+        matic: 137,
+        op: 10,
+      };
+      const [chain, chain_id] = faker.helpers.arrayElement(
+        Object.entries(chainIds) as Array<[keyof typeof chainIds, number]>,
+      );
+      // Ensure target is created with supported chain
+      createTarget(chain_id.toString());
+      const safeAddress = getAddress(faker.finance.ethereumAddress());
+      const defiVaultStake = defiVaultStatsBuilder()
+        .with('chain', chain)
+        .with('chain_id', chain_id)
+        .build();
+      dataSource.get.mockResolvedValue(
+        rawify({
+          status: 200,
+          // Note: Kiln always return { data: T }
+          data: [defiVaultStake],
+        }),
+      );
+
+      const actual = await target.getDefiVaultStakes({
+        safeAddress,
+        vault: defiVaultStake.vault,
+      });
+
+      expect(actual).toStrictEqual([defiVaultStake]);
+
+      expect(dataSource.get).toHaveBeenCalledTimes(1);
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${defiVaultStake.chain_id}_staking_defi_vault_stakes_${safeAddress}_${defiVaultStake.vault}`,
+          cacheType,
+        ),
+        url: `${baseUrl}/v1/defi/stakes`,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            vaults: `${chain}_${defiVaultStake.vault}`,
+            wallets: safeAddress,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+
+    it('should throw if the chainId is not supported by Kiln', async () => {
+      // Not Ethereum (1) or Optimism (10)
+      const chainId = faker.number.int({ min: 2, max: 9 });
+      // Ensure target is created with unsupported chain
+      createTarget(chainId.toString());
+      const safeAddress = getAddress(faker.finance.ethereumAddress());
+      const defiVaultStake = defiVaultStatsBuilder()
+        .with('chain_id', chainId)
+        .build();
+
+      await expect(
+        target.getDefiVaultStakes({
+          safeAddress,
+          vault: defiVaultStake.vault,
+        }),
+      ).rejects.toThrow();
+
+      expect(dataSource.get).not.toHaveBeenCalled();
+    });
+
+    it('should forward errors', async () => {
+      const chainIds = {
+        eth: 1,
+        arb: 42161,
+        bsc: 56,
+        matic: 137,
+        op: 10,
+      };
+      const [chain, chain_id] = faker.helpers.arrayElement(
+        Object.entries(chainIds) as Array<[keyof typeof chainIds, number]>,
+      );
+      // Ensure target is created with supported chain
+      createTarget(chain_id.toString());
+      const safeAddress = getAddress(faker.finance.ethereumAddress());
+      const defiVaultStake = defiVaultStatsBuilder()
+        .with('chain', chain)
+        .with('chain_id', chain_id)
+        .build();
+      const getDefiVaultsUrl = `${baseUrl}/v1/defi/stakes`;
+      const errorMessage = faker.lorem.sentence();
+      const statusCode = faker.internet.httpStatusCode({
+        types: ['clientError', 'serverError'],
+      });
+      const expected = new DataSourceError(errorMessage, statusCode);
+      dataSource.get.mockRejectedValueOnce(
+        new NetworkResponseError(
+          new URL(getDefiVaultsUrl),
+          {
+            status: statusCode,
+          } as Response,
+          new Error(errorMessage),
+        ),
+      );
+
+      await expect(
+        target.getDefiVaultStakes({
+          safeAddress,
+          vault: defiVaultStake.vault,
+        }),
+      ).rejects.toThrow(expected);
+
+      expect(dataSource.get).toHaveBeenCalledTimes(1);
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${defiVaultStake.chain_id}_staking_defi_vault_stakes_${safeAddress}_${defiVaultStake.vault}`,
+          cacheType,
+        ),
+        url: `${baseUrl}/v1/defi/stakes`,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            vaults: `${chain}_${defiVaultStake.vault}`,
+            wallets: safeAddress,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+  });
+
+  describe('getDefiMorphoExtraRewards', () => {
+    it('should return the defi Morpho extra rewards', async () => {
+      const chainIds = {
+        eth: 1,
+        arb: 42161,
+        bsc: 56,
+        matic: 137,
+        op: 10,
+      };
+      const [, chain_id] = faker.helpers.arrayElement(
+        Object.entries(chainIds) as Array<[keyof typeof chainIds, number]>,
+      );
+      // Ensure target is created with supported chain
+      createTarget(chain_id.toString());
+      const safeAddress = getAddress(faker.finance.ethereumAddress());
+      const defiMorphoExtraRewards = faker.helpers.multiple(
+        () => {
+          return defiMorphoExtraRewardBuilder().build();
+        },
+        { count: { min: 1, max: 5 } },
+      );
+      dataSource.get.mockResolvedValue(
+        rawify({
+          status: 200,
+          // Note: Kiln always return { data: T }
+          data: defiMorphoExtraRewards,
+        }),
+      );
+
+      const actual = await target.getDefiMorphoExtraRewards(safeAddress);
+
+      expect(actual).toStrictEqual(defiMorphoExtraRewards);
+
+      expect(dataSource.get).toHaveBeenCalledTimes(1);
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${chain_id}_staking_defi_morpho_extra_rewards_${safeAddress}`,
+          cacheType,
+        ),
+        url: `${baseUrl}/v1/defi/extra-rewards/morpho`,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            wallets: safeAddress,
+          },
+        },
+        expireTimeSeconds: stakingExpirationTimeInSeconds,
+        notFoundExpireTimeSeconds: notFoundExpireTimeSeconds,
+      });
+    });
+
+    it('should forward errors', async () => {
+      const chainIds = {
+        eth: 1,
+        arb: 42161,
+        bsc: 56,
+        matic: 137,
+        op: 10,
+      };
+      const [, chain_id] = faker.helpers.arrayElement(
+        Object.entries(chainIds) as Array<[keyof typeof chainIds, number]>,
+      );
+      // Ensure target is created with supported chain
+      createTarget(chain_id.toString());
+      const safeAddress = getAddress(faker.finance.ethereumAddress());
+      const getDefMorphoExtraRewardsUrl = `${baseUrl}/v1/defi/extra-rewards/morpho`;
+      const errorMessage = faker.lorem.sentence();
+      const statusCode = faker.internet.httpStatusCode({
+        types: ['clientError', 'serverError'],
+      });
+      const expected = new DataSourceError(errorMessage, statusCode);
+      dataSource.get.mockRejectedValueOnce(
+        new NetworkResponseError(
+          new URL(getDefMorphoExtraRewardsUrl),
+          {
+            status: statusCode,
+          } as Response,
+          new Error(errorMessage),
+        ),
+      );
+
+      await expect(
+        target.getDefiMorphoExtraRewards(safeAddress),
+      ).rejects.toThrow(expected);
+
+      expect(dataSource.get).toHaveBeenCalledTimes(1);
+      expect(dataSource.get).toHaveBeenNthCalledWith(1, {
+        cacheDir: new CacheDir(
+          `${chain_id}_staking_defi_morpho_extra_rewards_${safeAddress}`,
+          cacheType,
+        ),
+        url: `${baseUrl}/v1/defi/extra-rewards/morpho`,
+        networkRequest: {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+          params: {
+            wallets: safeAddress,
           },
         },
         expireTimeSeconds: stakingExpirationTimeInSeconds,
@@ -507,6 +838,7 @@ describe('KilnApi', () => {
           chainId,
           safeAddress,
           validatorsPublicKeys,
+          cacheType,
         }),
         url: getStakesUrl,
         networkRequest: {
@@ -561,6 +893,7 @@ describe('KilnApi', () => {
           chainId,
           safeAddress,
           validatorsPublicKeys,
+          cacheType,
         }),
         url: getStakesUrl,
         networkRequest: {
@@ -614,6 +947,7 @@ describe('KilnApi', () => {
         cacheDir: CacheRouter.getStakingTransactionStatusCacheDir({
           chainId,
           txHash,
+          cacheType,
         }),
         url: getTransactionStatusUrl,
         networkRequest: {
@@ -655,6 +989,7 @@ describe('KilnApi', () => {
         cacheDir: CacheRouter.getStakingTransactionStatusCacheDir({
           chainId,
           txHash,
+          cacheType,
         }),
         url: getTransactionStatusUrl,
         networkRequest: {

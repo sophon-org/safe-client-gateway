@@ -1,5 +1,8 @@
 import { addressBookBuilder } from '@/domain/accounts/address-books/entities/__tests__/address-book.builder';
-import { AddressBookSchema } from '@/domain/accounts/address-books/entities/address-book.entity';
+import {
+  ADDRESS_BOOK_NAME_MAX_LENGTH,
+  AddressBookSchema,
+} from '@/domain/accounts/address-books/entities/address-book.entity';
 import { DB_MAX_SAFE_INTEGER } from '@/domain/common/constants';
 import { faker } from '@faker-js/faker/.';
 import { getAddress } from 'viem';
@@ -118,7 +121,7 @@ describe('AddressBookSchema', () => {
         code: 'too_small',
         exact: false,
         inclusive: true,
-        message: 'Address book entry names must be at least 3 characters long',
+        message: 'Names must be at least 3 characters long',
         minimum: 3,
         path: ['data', 0, 'name'],
         type: 'string',
@@ -128,7 +131,7 @@ describe('AddressBookSchema', () => {
 
   it('should not verify an AddressBookItem with a longer name', () => {
     const addressBook = addressBookBuilder().build();
-    addressBook.data[0].name = 'e'.repeat(51); // max length is 50
+    addressBook.data[0].name = 'e'.repeat(ADDRESS_BOOK_NAME_MAX_LENGTH + 1);
 
     const result = AddressBookSchema.safeParse(addressBook);
 
@@ -137,8 +140,8 @@ describe('AddressBookSchema', () => {
         code: 'too_big',
         exact: false,
         inclusive: true,
-        message: 'Address book entry names must be at most 50 characters long',
-        maximum: 50,
+        message: `Names must be at most ${ADDRESS_BOOK_NAME_MAX_LENGTH} characters long`,
+        maximum: ADDRESS_BOOK_NAME_MAX_LENGTH,
         path: ['data', 0, 'name'],
         type: 'string',
       },
@@ -155,7 +158,7 @@ describe('AddressBookSchema', () => {
       {
         code: 'invalid_string',
         message:
-          'Address book entry names must start with a letter or number and can contain alphanumeric characters, periods, underscores, or hyphens',
+          'Names must start with a letter or number and can contain alphanumeric characters, spaces, periods, underscores, or hyphens',
         path: ['data', 0, 'name'],
         validation: 'regex',
       },
