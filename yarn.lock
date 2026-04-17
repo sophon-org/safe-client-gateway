@@ -8256,6 +8256,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lodash@npm:4.18.1":
+  version: 4.18.1
+  resolution: "lodash@npm:4.18.1"
+  checksum: 10/306fea53dfd39dad1f03d45ba654a2405aebd35797b673077f401edb7df2543623dc44b9effbb98f69b32152295fff725a4cec99c684098947430600c6af0c3f
+  languageName: node
+  linkType: hard
+
 "log-symbols@npm:^4.1.0":
   version: 4.1.0
   resolution: "log-symbols@npm:4.1.0"
@@ -9744,7 +9751,7 @@ __metadata:
     husky: "npm:9.1.7"
     jest: "npm:29.7.0"
     jsonwebtoken: "npm:9.0.3"
-    lodash: "npm:4.17.21"
+    lodash: "npm:4.18.1"
     nestjs-cls: "npm:6.0.1"
     pg: "npm:8.14.1"
     postgres: "npm:3.4.7"
